@@ -1,24 +1,33 @@
-name: Build and Push Docker Image
+name: Docker Build and Pushssd
 
 on:
   push:
-    branches: [ main ]
+    branches: [ main, master ]
+  workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
     steps:
-      - uses: actions/checkout@v3
-      
-      - name: Login to Docker Hub
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Login to GitHub Container Registry
         uses: docker/login-action@v2
         with:
-          username: ${{ secrets.DOCKER_USERNAME }}
-          password: ${{ secrets.DOCKER_TOKEN }}
-      
-      - name: Build and push
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and pushasd
         uses: docker/build-push-action@v4
         with:
           context: .
           push: true
-          tags: Hennes617/meshtasticapp:latest
+          tags: |
+            ghcr.io/Hennes617/mshapp:latest
+            ghcr.io/Hennes617/mshapp:${{ github.sha }}
