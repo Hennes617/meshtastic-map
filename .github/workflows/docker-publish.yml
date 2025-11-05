@@ -29,5 +29,5 @@ jobs:
           context: .
           push: true
           tags: |
-            ghcr.io/mshh:latest
-            ghcr.io/mshh:${{ github.sha }}
+            ghcr.io/hennes617/msh:latest
+            ghcr.io/hennes617/msh:${{ github.sha }}
