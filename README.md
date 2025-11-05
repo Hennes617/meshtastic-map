@@ -8,7 +8,7 @@
 <a href="./donate.md"><img src="https://img.shields.io/badge/Donate%20Bitcoin-bc1qy22smke8n4c54evdxmp7lpy9p0e6m9tavtlg2q-%23FF9900?style=flat&logo=bitcoin" alt="donate bitcoin"/></a>
 </p>
 
-[![Build and Push Docker Image](https://github.com/Hennes617/meshtastic-map/actions/workflows/docker-publish.yml/badge.svg)](https://github.com/Hennes617/meshtastic-map/actions/workflows/docker-publish.yml)
+[![Build and Push Docker Image Status](https://github.com/Hennes617/meshtastic-map/actions/workflows/docker-publish.yml/badge.svg)](https://github.com/Hennes617/meshtastic-map/actions/workflows/docker-publish.yml)
 
 A map of all Meshtastic nodes heard via MQTT.
 
