@@ -151,6 +151,10 @@ async function repairNodeIdentitiesFromMapReports() {
         },
     });
 
+    const nodesMissingLongNameCount = nodes.filter((node) => getMeaningfulString(node.long_name) == null).length;
+    const nodesMissingShortNameCount = nodes.filter((node) => getMeaningfulString(node.short_name) == null).length;
+    const nodesMissingHardwareModelCount = nodes.filter((node) => !hasKnownHardwareModel(node.hardware_model)).length;
+
     const nodeIdsToRepair = nodes
         .filter((node) => {
             return getMeaningfulString(node.long_name) == null
@@ -161,6 +165,7 @@ async function repairNodeIdentitiesFromMapReports() {
 
     if(nodeIdsToRepair.length === 0){
         console.log("No node identities needed repair.");
+        console.log(`Node identity stats: ${nodes.length} total, ${nodesMissingLongNameCount} missing long name, ${nodesMissingShortNameCount} missing short name, ${nodesMissingHardwareModelCount} missing hardware model.`);
         return;
     }
 
@@ -199,6 +204,9 @@ async function repairNodeIdentitiesFromMapReports() {
             created_at: "desc",
         },
     });
+
+    console.log(`Node identity stats: ${nodes.length} total, ${nodesMissingLongNameCount} missing long name, ${nodesMissingShortNameCount} missing short name, ${nodesMissingHardwareModelCount} missing hardware model.`);
+    console.log(`Repair candidates: ${nodeIdsToRepair.length} node(s), ${mapReports.length} usable map report row(s).`);
 
     const fallbackByNodeId = new Map();
     for(const mapReport of mapReports){
@@ -284,6 +292,9 @@ async function repairNodeIdentitiesFromMapReports() {
     }
 
     console.log(`Repaired identities for ${repairedNodeCount} node(s).`);
+    if(repairedNodeCount === 0){
+        console.log("No matching historical map reports with usable names or hardware models were found for the affected nodes.");
+    }
 }
 
 (async () => {
