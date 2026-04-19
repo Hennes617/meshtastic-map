@@ -52,7 +52,7 @@ const optionsList = [
         type: String,
         multiple: true,
         typeLabel: '<topic> ...',
-        description: "MQTT Topic to subscribe to (e.g: msh/#)",
+        description: "MQTT Topic to subscribe to (e.g: msh/+/2/e/#)",
     },
     {
         name: "allowed-portnums",
@@ -192,6 +192,19 @@ const optionsList = [
     },
 ];
 
+function getDefaultMqttTopics(mqttBrokerUrl) {
+    const broker = (mqttBrokerUrl ?? "").toLowerCase();
+
+    // The public Meshtastic broker currently emits packet traffic on regional topic roots
+    // like msh/US/2/e/... and msh/EU_868/2/e/..., while subscribing to msh/# does not
+    // reliably yield traffic for collectors.
+    if(broker.includes("mqtt.meshtastic.org")){
+        return ["msh/+/2/e/#"];
+    }
+
+    return ["msh/#"];
+}
+
 // parse command line args
 const options = commandLineArgs(optionsList);
 
@@ -217,7 +230,7 @@ const mqttBrokerUrl = options["mqtt-broker-url"] ?? "mqtt://mqtt.meshtastic.org"
 const mqttUsername = options["mqtt-username"] ?? "meshdev";
 const mqttPassword = options["mqtt-password"] ?? "large4cats";
 const mqttClientId = options["mqtt-client-id"] ?? null;
-const mqttTopics = options["mqtt-topic"] ?? ["msh/#"];
+const mqttTopics = options["mqtt-topic"] ?? getDefaultMqttTopics(mqttBrokerUrl);
 const allowedPortnums = options["allowed-portnums"] ?? null;
 const logUnknownPortnums = options["log-unknown-portnums"] ?? false;
 const collectServiceEnvelopes = options["collect-service-envelopes"] ?? false;
@@ -294,6 +307,30 @@ function purgeRecentWriteCaches() {
     purgeExpiredCacheEntries(recentPowerMetricWrites);
 }
 
+async function ensureNodeExists(nodeId) {
+    if(nodeId == null){
+        return;
+    }
+
+    try {
+        await prisma.node.upsert({
+            where: {
+                node_id: nodeId,
+            },
+            create: {
+                node_id: nodeId,
+                long_name: "",
+                short_name: "",
+                hardware_model: 0,
+                role: 0,
+            },
+            update: {},
+        });
+    } catch(err) {
+        // ignore races where another packet creates the same node concurrently
+    }
+}
+
 const recentWriteCacheCleanupInterval = setInterval(() => {
     purgeRecentWriteCaches();
 }, 60000);
@@ -325,6 +362,12 @@ const client = mqtt.connect(mqttBrokerUrl, {
     username: mqttUsername,
     password: mqttPassword,
     clientId: mqttClientId,
+});
+
+console.log("Starting MQTT collector", {
+    mqtt_broker_url: mqttBrokerUrl,
+    mqtt_topics: mqttTopics,
+    protobufs_path: protobufsPath,
 });
 
 // load protobufs
@@ -761,9 +804,29 @@ function convertHexIdToNumericId(hexId) {
 
 // subscribe to everything when connected
 client.on("connect", () => {
+    console.log("Connected to MQTT broker");
     for(const mqttTopic of mqttTopics){
-        client.subscribe(mqttTopic);
+        client.subscribe(mqttTopic, (err) => {
+            if(err){
+                console.error(`Failed to subscribe to MQTT topic ${mqttTopic}:`, err.message);
+                return;
+            }
+
+            console.log(`Subscribed to MQTT topic ${mqttTopic}`);
+        });
     }
+});
+
+client.on("error", (err) => {
+    console.error("MQTT client error:", err.message);
+});
+
+client.on("close", () => {
+    console.warn("MQTT connection closed");
+});
+
+client.on("reconnect", () => {
+    console.log("Reconnecting to MQTT broker");
 });
 
 // handle message received
@@ -845,6 +908,7 @@ client.on("message", async (topic, message) => {
         if(gatewayNodeId != null
             && !isRecentlySeen(recentGatewayHeartbeatWrites, gatewayNodeId.toString(), MQTT_GATEWAY_HEARTBEAT_WRITE_INTERVAL_MS)){
             try {
+                await ensureNodeExists(gatewayNodeId);
                 await prisma.node.updateMany({
                     where: {
                         node_id: gatewayNodeId,
@@ -935,6 +999,7 @@ client.on("message", async (topic, message) => {
 
                 // update node position in db
                 try {
+                    await ensureNodeExists(envelope.packet.from);
                     await prisma.node.updateMany({
                         where: {
                             node_id: envelope.packet.from,
@@ -1076,6 +1141,7 @@ client.on("message", async (topic, message) => {
 
             // update node neighbour info in db
             try {
+                await ensureNodeExists(envelope.packet.from);
                 await prisma.node.updateMany({
                     where: {
                         node_id: envelope.packet.from,
@@ -1259,6 +1325,7 @@ client.on("message", async (topic, message) => {
             // update node telemetry in db
             if(Object.keys(data).length > 0){
                 try {
+                    await ensureNodeExists(envelope.packet.from);
                     await prisma.node.updateMany({
                         where: {
                             node_id: envelope.packet.from,

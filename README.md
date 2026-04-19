@@ -11,7 +11,7 @@ This fork is maintained by Hennes Bolte for self-hosted deployments.
 
 ## How does it work?
 
-- An [mqtt client](./src/mqtt.js) is persistently connected to `mqtt.meshtastic.org` and subscribed to the `msh/#` topic.
+- An [mqtt client](./src/mqtt.js) is persistently connected to `mqtt.meshtastic.org` and, by default, subscribed to the public broker topic pattern `msh/+/2/e/#`.
 - All messages received are attempted to be decoded as [ServiceEnvelope](https://buf.build/meshtastic/protobufs/docs/main:meshtastic#meshtastic.ServiceEnvelope) packets.
 - If a packet is encrypted, it attempts to decrypt it with the default `AQ==` key.
 - If a packet can't be decoded as a `ServiceEnvelope`, it is ignored.
@@ -136,7 +136,7 @@ Options
   --mqtt-broker-url string                      MQTT Broker URL (e.g: mqtt://mqtt.meshtastic.org)
   --mqtt-username string                        MQTT Username (e.g: meshdev)
   --mqtt-password string                        MQTT Password (e.g: large4cats)
-  --mqtt-topic                                  MQTT Topic to subscribe to (e.g: msh/#)
+  --mqtt-topic                                  MQTT Topic to subscribe to (e.g: msh/+/2/e/#)
   --collect-service-envelopes                   This option will save all received service envelopes to the database.
   --collect-text-messages                       This option will save all received text messages to the database.
   --collect-waypoints                           This option will save all received waypoints to the database.
