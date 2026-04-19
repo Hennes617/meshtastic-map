@@ -2,7 +2,7 @@
 
 set -eu
 
-sh /app/docker/prisma.sh
+sh /app/docker/prisma.sh apply
 
 echo "Starting map ui"
 exec node src/index.js ${MAP_OPTS}

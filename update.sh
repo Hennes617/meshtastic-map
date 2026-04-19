@@ -4,9 +4,8 @@ git fetch && git pull
 # update node deps
 npm install
 
-# migrate database
-npx --yes prisma migrate deploy
-npx --yes prisma generate
+# sync prisma schema
+sh ./docker/prisma.sh apply
 
 # restart services
 service meshtastic-map restart
