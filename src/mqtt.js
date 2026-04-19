@@ -286,6 +286,140 @@ const mqttMessageQueue = [];
 let activeMqttMessageProcessors = 0;
 let mqttQueueWarningShown = false;
 
+function hasOwnField(message, fieldName) {
+    return Object.prototype.hasOwnProperty.call(message ?? {}, fieldName);
+}
+
+function getMeaningfulString(value) {
+    if(typeof value !== "string"){
+        return null;
+    }
+
+    const normalizedValue = value.trim();
+    if(normalizedValue.length === 0){
+        return null;
+    }
+
+    return normalizedValue;
+}
+
+function getKnownHardwareModel(value) {
+    if(Number.isInteger(value) && value > 0){
+        return value;
+    }
+
+    return null;
+}
+
+async function updateNodeFields(nodeId, data) {
+    if(nodeId == null || Object.keys(data).length === 0){
+        return;
+    }
+
+    await ensureNodeExists(nodeId);
+    await prisma.node.updateMany({
+        where: {
+            node_id: nodeId,
+        },
+        data: data,
+    });
+}
+
+function buildUserNodeData(user) {
+    const data = {};
+
+    const longName = getMeaningfulString(user.longName);
+    if(longName != null){
+        data.long_name = longName;
+    }
+
+    const shortName = getMeaningfulString(user.shortName);
+    if(shortName != null){
+        data.short_name = shortName;
+    }
+
+    const hardwareModel = getKnownHardwareModel(user.hwModel);
+    if(hardwareModel != null){
+        data.hardware_model = hardwareModel;
+    }
+
+    if(hasOwnField(user, "isLicensed")){
+        data.is_licensed = user.isLicensed === true;
+    }
+
+    if(hasOwnField(user, "role")){
+        data.role = user.role;
+    }
+
+    return data;
+}
+
+function buildMapReportNodeData(mapReport) {
+    const data = {};
+
+    const longName = getMeaningfulString(mapReport.longName);
+    if(longName != null){
+        data.long_name = longName;
+    }
+
+    const shortName = getMeaningfulString(mapReport.shortName);
+    if(shortName != null){
+        data.short_name = shortName;
+    }
+
+    const hardwareModel = getKnownHardwareModel(mapReport.hwModel);
+    if(hardwareModel != null){
+        data.hardware_model = hardwareModel;
+    }
+
+    if(hasOwnField(mapReport, "role")){
+        data.role = mapReport.role;
+    }
+
+    if(hasOwnField(mapReport, "latitudeI")){
+        data.latitude = mapReport.latitudeI;
+    }
+
+    if(hasOwnField(mapReport, "longitudeI")){
+        data.longitude = mapReport.longitudeI;
+    }
+
+    if(hasOwnField(mapReport, "altitude")){
+        data.altitude = mapReport.altitude !== 0 ? mapReport.altitude : null;
+    }
+
+    const firmwareVersion = getMeaningfulString(mapReport.firmwareVersion);
+    if(firmwareVersion != null){
+        data.firmware_version = firmwareVersion;
+    }
+
+    if(hasOwnField(mapReport, "region")){
+        data.region = mapReport.region;
+    }
+
+    if(hasOwnField(mapReport, "modemPreset")){
+        data.modem_preset = mapReport.modemPreset;
+    }
+
+    if(hasOwnField(mapReport, "hasDefaultChannel")){
+        data.has_default_channel = mapReport.hasDefaultChannel;
+    }
+
+    if(hasOwnField(mapReport, "positionPrecision")){
+        data.position_precision = mapReport.positionPrecision;
+    }
+
+    if(hasOwnField(mapReport, "numOnlineLocalNodes")){
+        data.num_online_local_nodes = mapReport.numOnlineLocalNodes;
+    }
+
+    if("latitude" in data || "longitude" in data || "altitude" in data || "position_precision" in data){
+        data.position_updated_at = new Date();
+    }
+
+    return data;
+}
+
 function isRecentlySeen(cache, key, ttlMs) {
     if(key == null){
         return false;
@@ -1117,26 +1251,7 @@ async function processMqttMessage(topic, message) {
 
             // create or update node in db
             try {
-                await prisma.node.upsert({
-                    where: {
-                        node_id: envelope.packet.from,
-                    },
-                    create: {
-                        node_id: envelope.packet.from,
-                        long_name: user.longName,
-                        short_name: user.shortName,
-                        hardware_model: user.hwModel,
-                        is_licensed: user.isLicensed === true,
-                        role: user.role,
-                    },
-                    update: {
-                        long_name: user.longName,
-                        short_name: user.shortName,
-                        hardware_model: user.hwModel,
-                        is_licensed: user.isLicensed === true,
-                        role: user.role,
-                    },
-                });
+                await updateNodeFields(envelope.packet.from, buildUserNodeData(user));
             } catch (e) {
                 console.error(e);
             }
@@ -1451,36 +1566,7 @@ async function processMqttMessage(topic, message) {
 
             // create or update node in db
             try {
-
-                // data to set on node
-                const data = {
-                    long_name: mapReport.longName,
-                    short_name: mapReport.shortName,
-                    hardware_model: mapReport.hwModel,
-                    role: mapReport.role,
-                    latitude: mapReport.latitudeI,
-                    longitude: mapReport.longitudeI,
-                    altitude: mapReport.altitude !== 0 ? mapReport.altitude : null,
-                    firmware_version: mapReport.firmwareVersion,
-                    region: mapReport.region,
-                    modem_preset: mapReport.modemPreset,
-                    has_default_channel: mapReport.hasDefaultChannel,
-                    position_precision: mapReport.positionPrecision,
-                    num_online_local_nodes: mapReport.numOnlineLocalNodes,
-                    position_updated_at: new Date(),
-                };
-
-                await prisma.node.upsert({
-                    where: {
-                        node_id: envelope.packet.from,
-                    },
-                    create: {
-                        node_id: envelope.packet.from,
-                        ...data,
-                    },
-                    update: data,
-                });
-
+                await updateNodeFields(envelope.packet.from, buildMapReportNodeData(mapReport));
             } catch (e) {
                 console.error(e);
             }

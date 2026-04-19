@@ -117,10 +117,14 @@ function getDisplayLongName(node, nodeIdHex) {
 }
 
 function getHardwareModelName(hardwareModel) {
+    if(hardwareModel == null || hardwareModel === 0){
+        return "Unknown Device";
+    }
+
     const hardwareModelName = hardwareModels[hardwareModel] ?? null;
 
     if(hardwareModelName == null || hardwareModelName === "UNSET"){
-        return "Unknown Device";
+        return `Unknown Device (${hardwareModel})`;
     }
 
     return hardwareModelName;
