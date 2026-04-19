@@ -1,6 +1,7 @@
 // node src/admin.js --purge-node-id 123
 // node src/admin.js --purge-node-id '!AABBCCDD'
 
+const fs = require("fs");
 const commandLineArgs = require("command-line-args");
 const commandLineUsage = require("command-line-usage");
 
@@ -26,6 +27,16 @@ const optionsList = [
         type: Boolean,
         description: "Repairs blank node names and unknown hardware models from saved map reports.",
     },
+    {
+        name: "import-node-identities-url",
+        type: String,
+        description: "Imports node identities from a JSON API URL.",
+    },
+    {
+        name: "import-node-identities-file",
+        type: String,
+        description: "Imports node identities from a local JSON file.",
+    },
 ];
 
 // parse command line args
@@ -50,6 +61,8 @@ if(options.help){
 // get options and fallback to default values
 const purgeNodeId = options["purge-node-id"] ?? null;
 const repairNodeIdentities = options["repair-node-identities"] ?? false;
+const importNodeIdentitiesUrl = options["import-node-identities-url"] ?? null;
+const importNodeIdentitiesFile = options["import-node-identities-file"] ?? null;
 
 function getMeaningfulString(value) {
     if(typeof value !== "string"){
@@ -66,6 +79,186 @@ function getMeaningfulString(value) {
 
 function hasKnownHardwareModel(value) {
     return Number.isInteger(value) && value > 0;
+}
+
+function isMeaningfulImportedLongName(value) {
+    const longName = getMeaningfulString(value);
+    if(longName == null){
+        return null;
+    }
+
+    if(/^Node\s+![0-9A-Fa-f]+$/.test(longName)){
+        return null;
+    }
+
+    return longName;
+}
+
+function getImportedNodeId(sourceNode) {
+    const candidates = [
+        sourceNode?.node_id,
+        sourceNode?.nodeId,
+        sourceNode?.node_id_hex,
+        sourceNode?.nodeIdHex,
+        sourceNode?.id,
+    ];
+
+    for(const candidate of candidates){
+        if(candidate == null){
+            continue;
+        }
+
+        try {
+            return NodeIdUtil.convertToNumeric(candidate);
+        } catch(err) {
+            // try next candidate
+        }
+    }
+
+    return null;
+}
+
+function getImportedShortName(sourceNode, nodeId) {
+    const rawShortName = getMeaningfulString(sourceNode?.raw_short_name);
+    if(rawShortName != null){
+        return rawShortName;
+    }
+
+    const shortName = getMeaningfulString(sourceNode?.short_name);
+    if(shortName == null){
+        return null;
+    }
+
+    if(nodeId != null){
+        const nodeIdSuffix = nodeId.toString(16).toUpperCase().slice(-4);
+        if(shortName === nodeIdSuffix){
+            return null;
+        }
+    }
+
+    return shortName;
+}
+
+function getImportedLongName(sourceNode) {
+    const rawLongName = getMeaningfulString(sourceNode?.raw_long_name);
+    if(rawLongName != null){
+        return rawLongName;
+    }
+
+    return isMeaningfulImportedLongName(sourceNode?.long_name);
+}
+
+function getImportedNodesFromPayload(payload) {
+    if(Array.isArray(payload)){
+        return payload;
+    }
+
+    if(Array.isArray(payload?.nodes)){
+        return payload.nodes;
+    }
+
+    if(Array.isArray(payload?.data?.nodes)){
+        return payload.data.nodes;
+    }
+
+    return [];
+}
+
+function buildImportedNodeIdentity(sourceNode) {
+    const nodeId = getImportedNodeId(sourceNode);
+    if(nodeId == null){
+        return null;
+    }
+
+    const data = {};
+
+    const longName = getImportedLongName(sourceNode);
+    if(longName != null){
+        data.long_name = longName;
+    }
+
+    const shortName = getImportedShortName(sourceNode, nodeId);
+    if(shortName != null){
+        data.short_name = shortName;
+    }
+
+    const hardwareModel = hasKnownHardwareModel(sourceNode?.hardware_model) ? sourceNode.hardware_model : null;
+    if(hardwareModel != null){
+        data.hardware_model = hardwareModel;
+    }
+
+    if(Number.isInteger(sourceNode?.role) && sourceNode.role >= 0){
+        data.role = sourceNode.role;
+    }
+
+    const firmwareVersion = getMeaningfulString(sourceNode?.firmware_version);
+    if(firmwareVersion != null){
+        data.firmware_version = firmwareVersion;
+    }
+
+    return {
+        node_id: nodeId,
+        data: data,
+    };
+}
+
+async function importNodeIdentitiesFromJsonPayload(payload, sourceLabel) {
+    const importedNodes = getImportedNodesFromPayload(payload);
+    if(importedNodes.length === 0){
+        console.log(`No importable nodes found in ${sourceLabel}.`);
+        return;
+    }
+
+    let importedCount = 0;
+    let skippedCount = 0;
+
+    for(const sourceNode of importedNodes){
+        const importedIdentity = buildImportedNodeIdentity(sourceNode);
+        if(importedIdentity == null || Object.keys(importedIdentity.data).length === 0){
+            skippedCount += 1;
+            continue;
+        }
+
+        await prisma.node.upsert({
+            where: {
+                node_id: importedIdentity.node_id,
+            },
+            create: {
+                node_id: importedIdentity.node_id,
+                long_name: importedIdentity.data.long_name ?? "",
+                short_name: importedIdentity.data.short_name ?? "",
+                hardware_model: importedIdentity.data.hardware_model ?? 0,
+                role: importedIdentity.data.role ?? 0,
+                firmware_version: importedIdentity.data.firmware_version ?? null,
+            },
+            update: importedIdentity.data,
+        });
+
+        importedCount += 1;
+    }
+
+    console.log(`Imported identities for ${importedCount} node(s) from ${sourceLabel}. Skipped ${skippedCount} node(s) without usable identity data.`);
+}
+
+async function importNodeIdentitiesFromFile(filePath) {
+    const fileContents = fs.readFileSync(filePath, "utf-8");
+    const payload = JSON.parse(fileContents);
+    await importNodeIdentitiesFromJsonPayload(payload, `file ${filePath}`);
+}
+
+async function importNodeIdentitiesFromUrl(url) {
+    const response = await fetch(url, {
+        headers: {
+            "accept": "application/json",
+        },
+    });
+
+    if(!response.ok){
+        throw new Error(`Request failed with status ${response.status} ${response.statusText}`);
+    }
+
+    const payload = await response.json();
+    await importNodeIdentitiesFromJsonPayload(payload, `URL ${url}`);
 }
 
 async function purgeNodeById(nodeId) {
@@ -307,6 +500,14 @@ async function repairNodeIdentitiesFromMapReports() {
 
         if(repairNodeIdentities){
             await repairNodeIdentitiesFromMapReports();
+        }
+
+        if(importNodeIdentitiesFile){
+            await importNodeIdentitiesFromFile(importNodeIdentitiesFile);
+        }
+
+        if(importNodeIdentitiesUrl){
+            await importNodeIdentitiesFromUrl(importNodeIdentitiesUrl);
         }
     } finally {
         await prisma.$disconnect();
