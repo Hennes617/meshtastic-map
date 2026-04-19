@@ -197,7 +197,7 @@ This will:
 - Run the database migrations.
 - Start the MQTT collector.
 - Start the Map UI.
-- Expose the map on port 8080.
+- Expose the map on host port `8081` by default (override with `MAP_PORT`).
 
 ## Testing
 

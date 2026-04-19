@@ -25,7 +25,7 @@ services:
       dockerfile: ./Dockerfile
     command: /app/docker/map.sh
     ports:
-      - 127.0.0.1:${MAP_PORT:-8080}:8080/tcp
+      - 127.0.0.1:${MAP_PORT:-8081}:8080/tcp
     environment:
       DATABASE_URL: "mysql://root:${MARIADB_ROOT_PASSWORD:-password}@database:3306/${MARIADB_DATABASE:-meshtastic-map}?connection_limit=100"
       MAP_OPTS: "${MAP_OPTS:-}" # add any custom index.js options here
