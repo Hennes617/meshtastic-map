@@ -134,6 +134,10 @@ function getHardwareImageUrl(hardwareModelName) {
     return "/images/no_image.png";
 }
 
+function hasHardwareImage(hardwareModelName) {
+    return availableDeviceImages.has(hardwareModelName);
+}
+
 function formatNodeInfo(node) {
     const nodeIdHex = formatNodeIdHex(node.node_id);
     const hardwareModelName = getHardwareModelName(node.hardware_model);
@@ -147,6 +151,7 @@ function formatNodeInfo(node) {
         short_name: getDisplayShortName(node, nodeIdHex),
         hardware_model_name: hardwareModelName,
         hardware_image_url: getHardwareImageUrl(hardwareModelName),
+        has_hardware_image: hasHardwareImage(hardwareModelName),
         role_name: roles[node.role] ?? null,
         region_name: regionCodes[node.region] ?? null,
         modem_preset_name: modemPresets[node.modem_preset] ?? null,
@@ -814,6 +819,7 @@ app.get('/api/v1/stats/hardware-models', async (req, res) => {
                hardware_model: result.hardware_model,
                hardware_model_name: hardwareModelName,
                hardware_image_url: getHardwareImageUrl(hardwareModelName),
+               has_hardware_image: hasHardwareImage(hardwareModelName),
            };
         });
 

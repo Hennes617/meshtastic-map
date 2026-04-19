@@ -592,7 +592,10 @@
                                         <div class="absolute inset-0 group-hover:bg-gray-100" aria-hidden="true"></div>
                                         <div class="relative flex min-w-0 flex-1 items-center">
                                             <span class="relative inline-block flex-shrink-0 mr-4">
-                                                <img class="h-20 w-20 rounded object-contain" :src="hardwareModel.hardware_image_url" alt="" onerror="if(this.src != '/images/no_image.png') this.src = '/images/no_image.png';">
+                                                <img v-if="hardwareModel.has_hardware_image" class="h-20 w-20 rounded object-contain" :src="hardwareModel.hardware_image_url" alt="" onerror="if(this.src != '/images/no_image.png') this.src = '/images/no_image.png';">
+                                                <div v-else class="flex h-20 w-20 items-center justify-center rounded bg-stone-100 text-center text-xs font-medium text-stone-500">
+                                                    No<br/>Image
+                                                </div>
                                             </span>
                                             <div class="truncate">
                                                 <p class="truncate text-sm font-medium text-gray-900">{{ hardwareModel.hardware_model_name }}</p>
@@ -684,7 +687,10 @@
 
                             <div class="flex flex-col my-2">
                                 <div class="mx-auto">
-                                    <img class="h-48 w-48 rounded object-contain" :src="selectedNode.hardware_image_url" alt="" onerror="if(this.src != '/images/no_image.png') this.src = '/images/no_image.png';">
+                                    <img v-if="selectedNode.has_hardware_image" class="h-48 w-48 rounded object-contain" :src="selectedNode.hardware_image_url" alt="" onerror="if(this.src != '/images/no_image.png') this.src = '/images/no_image.png';">
+                                    <div v-else class="flex h-36 w-36 items-center justify-center rounded-3xl border border-stone-200 bg-stone-50 px-4 text-center text-sm font-medium text-stone-500">
+                                        Device image unavailable
+                                    </div>
                                 </div>
                             </div>
 
@@ -3995,7 +4001,11 @@
 
         var loraFrequencyRange = getRegionFrequencyRange(node.region_name);
 
-        var tooltip = `<img class="mb-4 w-40 mx-auto" src="${node.hardware_image_url}" onerror="if(this.src != '/images/no_image.png') this.src = '/images/no_image.png';"/>` +
+        var tooltipImage = node.has_hardware_image
+            ? `<img class="mb-4 w-40 mx-auto" src="${node.hardware_image_url}" onerror="if(this.src != '/images/no_image.png') this.src = '/images/no_image.png';"/>`
+            : ``;
+
+        var tooltip = tooltipImage +
             `<b>${escapeString(node.long_name)}</b>` +
             `<br/>Short Name: ${escapeString(node.short_name)}` +
             `<br/>MQTT: ${mqttStatus}` +
