@@ -6,6 +6,7 @@ const protobufjs = require("protobufjs");
 const commandLineArgs = require("command-line-args");
 const commandLineUsage = require("command-line-usage");
 const PositionUtil = require("./utils/position_util");
+const { importNodeIdentitiesFromUrl } = require("./utils/node_identity_import");
 
 // create prisma db client
 const { PrismaClient } = require("@prisma/client");
@@ -53,6 +54,18 @@ const optionsList = [
         multiple: true,
         typeLabel: '<topic> ...',
         description: "MQTT Topic to subscribe to (e.g: msh/+/2/e/#)",
+    },
+    {
+        name: "identity-source-url",
+        type: String,
+        multiple: true,
+        typeLabel: '<url> ...',
+        description: "External JSON API URL(s) to sync missing node identities from.",
+    },
+    {
+        name: "identity-sync-interval-seconds",
+        type: Number,
+        description: "How often to sync missing node identities from external JSON APIs.",
     },
     {
         name: "allowed-portnums",
@@ -231,6 +244,10 @@ const mqttUsername = options["mqtt-username"] ?? "meshdev";
 const mqttPassword = options["mqtt-password"] ?? "large4cats";
 const mqttClientId = options["mqtt-client-id"] ?? `meshtastic-map-${crypto.randomBytes(4).toString("hex")}`;
 const mqttTopics = options["mqtt-topic"] ?? getDefaultMqttTopics(mqttBrokerUrl);
+const identitySourceUrls = [...new Set(options["identity-source-url"] ?? [
+    "https://meshmap.ro/api/v1/nodes",
+])];
+const identitySyncIntervalSeconds = options["identity-sync-interval-seconds"] ?? 21600;
 const allowedPortnums = options["allowed-portnums"] ?? null;
 const logUnknownPortnums = options["log-unknown-portnums"] ?? false;
 const collectServiceEnvelopes = options["collect-service-envelopes"] ?? false;
@@ -518,6 +535,33 @@ if(typeof recentWriteCacheCleanupInterval.unref === "function"){
     recentWriteCacheCleanupInterval.unref();
 }
 
+let identitySyncInFlight = false;
+
+async function syncExternalNodeIdentities() {
+    if(identitySyncInFlight || identitySourceUrls.length === 0){
+        return;
+    }
+
+    identitySyncInFlight = true;
+
+    try {
+        for(const identitySourceUrl of identitySourceUrls){
+            try {
+                const result = await importNodeIdentitiesFromUrl(prisma, identitySourceUrl);
+                console.log("External node identity sync completed", {
+                    source: result.source_label,
+                    imported_count: result.imported_count,
+                    skipped_count: result.skipped_count,
+                });
+            } catch(err) {
+                console.warn(`External node identity sync failed for ${identitySourceUrl}: ${err.message}`);
+            }
+        }
+    } finally {
+        identitySyncInFlight = false;
+    }
+}
+
 // ensure protobufs exist
 if(!fs.existsSync(path.join(protobufsPath, "meshtastic/mqtt.proto"))){
     console.error([
@@ -547,6 +591,8 @@ console.log("Starting MQTT collector", {
     mqtt_broker_url: mqttBrokerUrl,
     mqtt_client_id: mqttClientId,
     mqtt_topics: mqttTopics,
+    identity_source_urls: identitySourceUrls,
+    identity_sync_interval_seconds: identitySyncIntervalSeconds,
     protobufs_path: protobufsPath,
 });
 
@@ -580,6 +626,22 @@ if(purgeIntervalSeconds){
         await purgeOldWaypoints();
         await forgetOutdatedNodePositions();
     }, purgeIntervalSeconds * 1000);
+}
+
+if(identitySyncIntervalSeconds > 0 && identitySourceUrls.length > 0){
+    syncExternalNodeIdentities().catch((err) => {
+        console.warn(`Initial external node identity sync failed: ${err.message}`);
+    });
+
+    const identitySyncInterval = setInterval(() => {
+        syncExternalNodeIdentities().catch((err) => {
+            console.warn(`Scheduled external node identity sync failed: ${err.message}`);
+        });
+    }, identitySyncIntervalSeconds * 1000);
+
+    if(typeof identitySyncInterval.unref === "function"){
+        identitySyncInterval.unref();
+    }
 }
 
 /**
