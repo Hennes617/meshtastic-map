@@ -55,6 +55,10 @@ const hardwareModels = JSON.parse(fs.readFileSync(path.join(__dirname, "json/har
 const roles = JSON.parse(fs.readFileSync(path.join(__dirname, "json/roles.json"), "utf-8"));
 const regionCodes = JSON.parse(fs.readFileSync(path.join(__dirname, "json/region_codes.json"), "utf-8"));
 const modemPresets = JSON.parse(fs.readFileSync(path.join(__dirname, "json/modem_presets.json"), "utf-8"));
+const availableDeviceImages = new Set(
+    fs.readdirSync(path.join(__dirname, "public/images/devices"))
+        .map((filename) => path.parse(filename).name)
+);
 
 // The map only needs a subset of the node columns during the initial load.
 const mapNodeSelect = {
@@ -90,11 +94,59 @@ const textMessageNodeSelect = {
 };
 
 // appends extra info for node objects returned from api
+function formatNodeIdHex(nodeId) {
+    return "!" + nodeId.toString(16);
+}
+
+function getDisplayShortName(node, nodeIdHex) {
+    const shortName = node.short_name?.trim();
+    if(shortName){
+        return shortName;
+    }
+
+    return nodeIdHex.replace("!", "").slice(-4).toUpperCase();
+}
+
+function getDisplayLongName(node, nodeIdHex) {
+    const longName = node.long_name?.trim();
+    if(longName){
+        return longName;
+    }
+
+    return `Node ${nodeIdHex}`;
+}
+
+function getHardwareModelName(hardwareModel) {
+    const hardwareModelName = hardwareModels[hardwareModel] ?? null;
+
+    if(hardwareModelName == null || hardwareModelName === "UNSET"){
+        return "Unknown Device";
+    }
+
+    return hardwareModelName;
+}
+
+function getHardwareImageUrl(hardwareModelName) {
+    if(availableDeviceImages.has(hardwareModelName)){
+        return `/images/devices/${hardwareModelName}.png`;
+    }
+
+    return "/images/no_image.png";
+}
+
 function formatNodeInfo(node) {
+    const nodeIdHex = formatNodeIdHex(node.node_id);
+    const hardwareModelName = getHardwareModelName(node.hardware_model);
+
     return {
         ...node,
-        node_id_hex: "!" + node.node_id.toString(16),
-        hardware_model_name: hardwareModels[node.hardware_model] ?? null,
+        raw_long_name: node.long_name,
+        raw_short_name: node.short_name,
+        node_id_hex: nodeIdHex,
+        long_name: getDisplayLongName(node, nodeIdHex),
+        short_name: getDisplayShortName(node, nodeIdHex),
+        hardware_model_name: hardwareModelName,
+        hardware_image_url: getHardwareImageUrl(hardwareModelName),
         role_name: roles[node.role] ?? null,
         region_name: regionCodes[node.region] ?? null,
         modem_preset_name: modemPresets[node.modem_preset] ?? null,
@@ -756,10 +808,12 @@ app.get('/api/v1/stats/hardware-models', async (req, res) => {
         });
 
         const hardwareModelStats = results.map((result) => {
+           const hardwareModelName = getHardwareModelName(result.hardware_model);
            return {
                count: result._count.hardware_model,
                hardware_model: result.hardware_model,
-               hardware_model_name: hardwareModels[result.hardware_model] ?? "UNKNOWN",
+               hardware_model_name: hardwareModelName,
+               hardware_image_url: getHardwareImageUrl(hardwareModelName),
            };
         });
 
