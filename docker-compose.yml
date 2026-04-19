@@ -13,6 +13,10 @@ services:
     environment:
       DATABASE_URL: "mysql://root:${MARIADB_ROOT_PASSWORD:-password}@database:3306/${MARIADB_DATABASE:-meshtastic-map}?connection_limit=100"
       MQTT_OPTS: "${MQTT_OPTS:-}" # add any custom mqtt.js options here
+      AUTO_FETCH_PROTOBUFS: "${AUTO_FETCH_PROTOBUFS:-true}"
+      PROTOBUFS_REPO_URL: "${PROTOBUFS_REPO_URL:-https://github.com/meshtastic/protobufs}"
+      PROTOBUFS_GIT_REF: "${PROTOBUFS_GIT_REF:-}"
+      PROTOBUFS_CLONE_PATH: "${PROTOBUFS_CLONE_PATH:-/app/src/external/protobufs}"
 
   # runs the web map ui
   meshtastic-map:

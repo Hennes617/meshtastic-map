@@ -199,6 +199,9 @@ This will:
 - Start the Map UI.
 - Expose the map on host port `8081` by default (override with `MAP_PORT`).
 
+On container start, the MQTT service will automatically clone the Meshtastic protobuf repository into `src/external/protobufs` if it is missing.
+You can disable that with `AUTO_FETCH_PROTOBUFS=false` or pin a specific ref with `PROTOBUFS_GIT_REF`.
+
 ## Testing
 
 To execute unit tests, run the following;
