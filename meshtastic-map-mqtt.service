@@ -7,9 +7,9 @@ StartLimitIntervalSec=0
 Type=simple
 Restart=always
 RestartSec=1
-User=liamcottle
-WorkingDirectory=/home/liamcottle/meshtastic-map
-ExecStart=/usr/bin/env node /home/liamcottle/meshtastic-map/src/mqtt.js \
+User=hennes
+WorkingDirectory=/home/hennes/meshtastic-map
+ExecStart=/usr/bin/env node /home/hennes/meshtastic-map/src/mqtt.js \
   --mqtt-broker-url mqtt://127.0.0.1 \
   --mqtt-username username \
   --mqtt-password password \

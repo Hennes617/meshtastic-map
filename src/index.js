@@ -56,6 +56,39 @@ const roles = JSON.parse(fs.readFileSync(path.join(__dirname, "json/roles.json")
 const regionCodes = JSON.parse(fs.readFileSync(path.join(__dirname, "json/region_codes.json"), "utf-8"));
 const modemPresets = JSON.parse(fs.readFileSync(path.join(__dirname, "json/modem_presets.json"), "utf-8"));
 
+// The map only needs a subset of the node columns during the initial load.
+const mapNodeSelect = {
+    node_id: true,
+    long_name: true,
+    short_name: true,
+    hardware_model: true,
+    role: true,
+    firmware_version: true,
+    region: true,
+    modem_preset: true,
+    has_default_channel: true,
+    position_precision: true,
+    num_online_local_nodes: true,
+    latitude: true,
+    longitude: true,
+    altitude: true,
+    position_updated_at: true,
+    battery_level: true,
+    voltage: true,
+    channel_utilization: true,
+    air_util_tx: true,
+    neighbours_updated_at: true,
+    mqtt_connection_state_updated_at: true,
+    created_at: true,
+    updated_at: true,
+};
+
+const textMessageNodeSelect = {
+    node_id: true,
+    long_name: true,
+    short_name: true,
+};
+
 // appends extra info for node objects returned from api
 function formatNodeInfo(node) {
     return {
@@ -66,6 +99,29 @@ function formatNodeInfo(node) {
         region_name: regionCodes[node.region] ?? null,
         modem_preset_name: modemPresets[node.modem_preset] ?? null,
     };
+}
+
+function parseNodeIds(idsValue) {
+    if(!idsValue){
+        return [];
+    }
+
+    const ids = idsValue
+        .split(",")
+        .map((id) => id.trim())
+        .filter(Boolean)
+        .slice(0, 250);
+
+    const parsedIds = [];
+    for(const id of ids){
+        try {
+            parsedIds.push(BigInt(id));
+        } catch(err) {
+            // ignore invalid ids
+        }
+    }
+
+    return [...new Set(parsedIds)];
 }
 
 const app = express();
@@ -93,6 +149,13 @@ app.get('/api', async (req, res) => {
             "params": {
                 "role": "Filter by role",
                 "hardware_model": "Filter by hardware model",
+            },
+        },
+        {
+            "path": "/api/v1/nodes/by-ids",
+            "description": "Specific meshtastic nodes by id",
+            "params": {
+                "ids": "Comma separated node ids",
             },
         },
         {
@@ -196,6 +259,7 @@ app.get('/api/v1/nodes', async (req, res) => {
 
         // get nodes from db
         const nodes = await prisma.node.findMany({
+            select: mapNodeSelect,
             where: {
                 role: role,
                 hardware_model: hardwareModel,
@@ -219,13 +283,45 @@ app.get('/api/v1/nodes', async (req, res) => {
     }
 });
 
+app.get('/api/v1/nodes/by-ids', async (req, res) => {
+    try {
+
+        const ids = parseNodeIds(req.query.ids ?? "");
+        if(ids.length === 0){
+            res.json({
+                nodes: [],
+            });
+            return;
+        }
+
+        const nodes = await prisma.node.findMany({
+            select: textMessageNodeSelect,
+            where: {
+                node_id: {
+                    in: ids,
+                },
+            },
+        });
+
+        res.json({
+            nodes: nodes.map((node) => formatNodeInfo(node)),
+        });
+
+    } catch(err) {
+        console.error(err);
+        res.status(500).json({
+            message: "Something went wrong, try again later.",
+        });
+    }
+});
+
 app.get('/api/v1/nodes/:nodeId', async (req, res) => {
     try {
 
         const nodeId = parseInt(req.params.nodeId);
 
         // find node
-        const node = await prisma.node.findFirst({
+        const node = await prisma.node.findUnique({
             where: {
                 node_id: nodeId,
             },
@@ -766,33 +862,21 @@ app.get('/api/v1/text-messages/embed', async (req, res) => {
 app.get('/api/v1/waypoints', async (req, res) => {
     try {
 
-        // get waypoints from db
-        const waypoints = await prisma.waypoint.findMany({
-            orderBy: {
-                id: 'desc',
-            },
-        });
+        const nowInSeconds = Math.floor(Date.now() / 1000);
 
-        // ensure we only have the latest unique waypoints
-        // since ordered by newest first, older entries will be ignored
-        const uniqueWaypoints = [];
-        for(const waypoint of waypoints){
-
-            // skip if we already have a newer entry for this waypoint
-            if(uniqueWaypoints.find((w) => w.from === waypoint.from && w.waypoint_id === waypoint.waypoint_id)){
-                continue;
-            }
-
-            // first time seeing this waypoint, add to unique list
-            uniqueWaypoints.push(waypoint);
-
-        }
-
-        // we only want waypoints that haven't expired yet
-        const nonExpiredWayPoints = uniqueWaypoints.filter((waypoint) => {
-            const nowInSeconds = Math.floor(Date.now() / 1000);
-            return waypoint.expire >= nowInSeconds;
-        });
+        // Get only the newest non-expired waypoint per sender/waypoint id pair.
+        const nonExpiredWayPoints = await prisma.$queryRaw`
+            SELECT waypoints.*
+            FROM waypoints
+            INNER JOIN (
+                SELECT \`from\`, waypoint_id, MAX(id) AS id
+                FROM waypoints
+                WHERE expire >= ${nowInSeconds}
+                GROUP BY \`from\`, waypoint_id
+            ) latest_waypoints
+                ON latest_waypoints.id = waypoints.id
+            ORDER BY waypoints.id DESC
+        `;
 
         res.json({
             waypoints: nonExpiredWayPoints,

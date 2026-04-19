@@ -234,7 +234,7 @@ const dropPacketsNotOkToMqtt = options["drop-packets-not-ok-to-mqtt"] ?? false;
 const dropPortnumsWithoutBitfield = options["drop-portnums-without-bitfield"] ?? null;
 const oldFirmwarePositionPrecision = options["old-firmware-position-precision"] ?? null;
 const forgetOutdatedNodePositionsAfterSeconds = options["forget-outdated-node-positions-after-seconds"] ?? null;
-const purgeIntervalSeconds = options["purge-interval-seconds"] ?? 10;
+const purgeIntervalSeconds = options["purge-interval-seconds"] ?? 60;
 const purgeNodesUnheardForSeconds = options["purge-nodes-unheard-for-seconds"] ?? null;
 const purgeDeviceMetricsAfterSeconds = options["purge-device-metrics-after-seconds"] ?? null;
 const purgeEnvironmentMetricsAfterSeconds = options["purge-environment-metrics-after-seconds"] ?? null;
@@ -247,6 +247,61 @@ const purgeTextMessagesAfterSeconds = options["purge-text-messages-after-seconds
 const purgeTraceroutesAfterSeconds = options["purge-traceroutes-after-seconds"] ?? null;
 const purgeWaypointsAfterSeconds = options["purge-waypoints-after-seconds"] ?? null;
 
+const MQTT_GATEWAY_HEARTBEAT_WRITE_INTERVAL_MS = 10000;
+const POSITION_WRITE_DEDUPE_WINDOW_MS = 60000;
+const MAP_REPORT_WRITE_DEDUPE_WINDOW_MS = 60000;
+const DEVICE_METRIC_WRITE_DEDUPE_WINDOW_MS = 15000;
+const ENVIRONMENT_METRIC_WRITE_DEDUPE_WINDOW_MS = 15000;
+const POWER_METRIC_WRITE_DEDUPE_WINDOW_MS = 15000;
+
+const recentGatewayHeartbeatWrites = new Map();
+const recentPositionWrites = new Map();
+const recentMapReportWrites = new Map();
+const recentDeviceMetricWrites = new Map();
+const recentEnvironmentMetricWrites = new Map();
+const recentPowerMetricWrites = new Map();
+
+function isRecentlySeen(cache, key, ttlMs) {
+    if(key == null){
+        return false;
+    }
+
+    const now = Date.now();
+    const expiresAt = cache.get(key);
+    if(expiresAt != null && expiresAt > now){
+        return true;
+    }
+
+    cache.set(key, now + ttlMs);
+    return false;
+}
+
+function purgeExpiredCacheEntries(cache) {
+    const now = Date.now();
+    for(const [key, expiresAt] of cache.entries()){
+        if(expiresAt <= now){
+            cache.delete(key);
+        }
+    }
+}
+
+function purgeRecentWriteCaches() {
+    purgeExpiredCacheEntries(recentGatewayHeartbeatWrites);
+    purgeExpiredCacheEntries(recentPositionWrites);
+    purgeExpiredCacheEntries(recentMapReportWrites);
+    purgeExpiredCacheEntries(recentDeviceMetricWrites);
+    purgeExpiredCacheEntries(recentEnvironmentMetricWrites);
+    purgeExpiredCacheEntries(recentPowerMetricWrites);
+}
+
+const recentWriteCacheCleanupInterval = setInterval(() => {
+    purgeRecentWriteCaches();
+}, 60000);
+
+if(typeof recentWriteCacheCleanupInterval.unref === "function"){
+    recentWriteCacheCleanupInterval.unref();
+}
+
 // ensure protobufs exist
 if(!fs.existsSync(path.join(protobufsPath, "meshtastic/mqtt.proto"))){
     console.error([
@@ -254,7 +309,6 @@ if(!fs.existsSync(path.join(protobufsPath, "meshtastic/mqtt.proto"))){
         "",
         "This project is licensed under the MIT license to allow end users to do as they wish.",
         "Unfortunately, the Meshtastic protobuf schema files are licensed under GPLv3, which means they can not be bundled in this project due to license conflicts.",
-        "https://github.com/liamcottle/meshtastic-map/issues/102",
         "https://github.com/meshtastic/protobufs/issues/695",
         "",
         "If you clone and install the Meshtastic protobufs as described below, your use of those files will be subject to the GPLv3 license.",
@@ -738,6 +792,7 @@ client.on("message", async (topic, message) => {
         // bitfield was added in v2.5 of meshtastic firmware
         // this value will be null for packets from v2.4.x and below, and will be an integer in v2.5.x and above
         const bitfield = envelope.packet?.decoded?.bitfield;
+        const gatewayNodeId = envelope.gatewayId ? convertHexIdToNumericId(envelope.gatewayId) : null;
 
         // check if we can see the decrypted packet data
         if(envelope.packet.decoded != null){
@@ -773,7 +828,7 @@ client.on("message", async (topic, message) => {
                     data: {
                         mqtt_topic: topic,
                         channel_id: envelope.channelId,
-                        gateway_id: envelope.gatewayId ? convertHexIdToNumericId(envelope.gatewayId) : null,
+                        gateway_id: gatewayNodeId,
                         to: envelope.packet.to,
                         from: envelope.packet.from,
                         protobuf: message,
@@ -787,17 +842,20 @@ client.on("message", async (topic, message) => {
         }
 
         // track when a node last gated a packet to mqtt
-        try {
-            await prisma.node.updateMany({
-                where: {
-                    node_id: convertHexIdToNumericId(envelope.gatewayId),
-                },
-                data: {
-                    mqtt_connection_state_updated_at: new Date(),
-                },
-            });
-        } catch(e) {
-            // don't care if updating mqtt timestamp fails
+        if(gatewayNodeId != null
+            && !isRecentlySeen(recentGatewayHeartbeatWrites, gatewayNodeId.toString(), MQTT_GATEWAY_HEARTBEAT_WRITE_INTERVAL_MS)){
+            try {
+                await prisma.node.updateMany({
+                    where: {
+                        node_id: gatewayNodeId,
+                    },
+                    data: {
+                        mqtt_connection_state_updated_at: new Date(),
+                    },
+                });
+            } catch(e) {
+                // don't care if updating mqtt timestamp fails
+            }
         }
 
         const logKnownPacketTypes = false;
@@ -834,7 +892,7 @@ client.on("message", async (topic, message) => {
                         channel: envelope.packet.channel,
                         packet_id: envelope.packet.id,
                         channel_id: envelope.channelId,
-                        gateway_id: envelope.gatewayId ? convertHexIdToNumericId(envelope.gatewayId) : null,
+                        gateway_id: gatewayNodeId,
                         text: envelope.packet.decoded.payload.toString(),
                         rx_time: envelope.packet.rxTime,
                         rx_snr: envelope.packet.rxSnr,
@@ -901,20 +959,8 @@ client.on("message", async (topic, message) => {
             }
 
             try {
-
-                // find an existing position with duplicate information created in the last 60 seconds
-                const existingDuplicatePosition = await prisma.position.findFirst({
-                    where: {
-                        node_id: envelope.packet.from,
-                        packet_id: envelope.packet.id,
-                        created_at: {
-                            gte: new Date(Date.now() - 60000), // created in the last 60 seconds
-                        },
-                    }
-                });
-
-                // create position if no duplicates found
-                if(!existingDuplicatePosition){
+                const positionWriteKey = `${envelope.packet.from}:${envelope.packet.id}`;
+                if(!isRecentlySeen(recentPositionWrites, positionWriteKey, POSITION_WRITE_DEDUPE_WINDOW_MS)){
                     await prisma.position.create({
                         data: {
                             node_id: envelope.packet.from,
@@ -923,7 +969,7 @@ client.on("message", async (topic, message) => {
                             channel: envelope.packet.channel,
                             packet_id: envelope.packet.id,
                             channel_id: envelope.channelId,
-                            gateway_id: envelope.gatewayId ? convertHexIdToNumericId(envelope.gatewayId) : null,
+                            gateway_id: gatewayNodeId,
                             latitude: position.latitudeI,
                             longitude: position.longitudeI,
                             altitude: position.altitude,
@@ -1008,7 +1054,7 @@ client.on("message", async (topic, message) => {
                         channel: envelope.packet.channel,
                         packet_id: envelope.packet.id,
                         channel_id: envelope.channelId,
-                        gateway_id: envelope.gatewayId ? convertHexIdToNumericId(envelope.gatewayId) : null,
+                        gateway_id: gatewayNodeId,
                     },
                 });
             } catch (e) {
@@ -1099,23 +1145,15 @@ client.on("message", async (topic, message) => {
 
                 // create device metric
                 try {
+                    const deviceMetricWriteKey = [
+                        envelope.packet.from,
+                        data.battery_level,
+                        data.voltage,
+                        data.channel_utilization,
+                        data.air_util_tx,
+                    ].join(":");
 
-                    // find an existing metric with duplicate information created in the last 15 seconds
-                    const existingDuplicateDeviceMetric = await prisma.deviceMetric.findFirst({
-                        where: {
-                            node_id: envelope.packet.from,
-                            battery_level: data.battery_level,
-                            voltage: data.voltage,
-                            channel_utilization: data.channel_utilization,
-                            air_util_tx: data.air_util_tx,
-                            created_at: {
-                                gte: new Date(Date.now() - 15000), // created in the last 15 seconds
-                            },
-                        }
-                    })
-
-                    // create metric if no duplicates found
-                    if(!existingDuplicateDeviceMetric){
+                    if(!isRecentlySeen(recentDeviceMetricWrites, deviceMetricWriteKey, DEVICE_METRIC_WRITE_DEDUPE_WINDOW_MS)){
                         await prisma.deviceMetric.create({
                             data: {
                                 node_id: envelope.packet.from,
@@ -1156,20 +1194,8 @@ client.on("message", async (topic, message) => {
 
                 // create environment metric
                 try {
-
-                    // find an existing metric with duplicate information created in the last 15 seconds
-                    const existingDuplicateEnvironmentMetric = await prisma.environmentMetric.findFirst({
-                        where: {
-                            node_id: envelope.packet.from,
-                            packet_id: envelope.packet.id,
-                            created_at: {
-                                gte: new Date(Date.now() - 15000), // created in the last 15 seconds
-                            },
-                        }
-                    })
-
-                    // create metric if no duplicates found
-                    if(!existingDuplicateEnvironmentMetric){
+                    const environmentMetricWriteKey = `${envelope.packet.from}:${envelope.packet.id}`;
+                    if(!isRecentlySeen(recentEnvironmentMetricWrites, environmentMetricWriteKey, ENVIRONMENT_METRIC_WRITE_DEDUPE_WINDOW_MS)){
                         await prisma.environmentMetric.create({
                             data: {
                                 node_id: envelope.packet.from,
@@ -1208,20 +1234,8 @@ client.on("message", async (topic, message) => {
 
                 // create power metric
                 try {
-
-                    // find an existing metric with duplicate information created in the last 15 seconds
-                    const existingDuplicatePowerMetric = await prisma.powerMetric.findFirst({
-                        where: {
-                            node_id: envelope.packet.from,
-                            packet_id: envelope.packet.id,
-                            created_at: {
-                                gte: new Date(Date.now() - 15000), // created in the last 15 seconds
-                            },
-                        }
-                    })
-
-                    // create metric if no duplicates found
-                    if(!existingDuplicatePowerMetric){
+                    const powerMetricWriteKey = `${envelope.packet.from}:${envelope.packet.id}`;
+                    if(!isRecentlySeen(recentPowerMetricWrites, powerMetricWriteKey, POWER_METRIC_WRITE_DEDUPE_WINDOW_MS)){
                         await prisma.powerMetric.create({
                             data: {
                                 node_id: envelope.packet.from,
@@ -1284,7 +1298,7 @@ client.on("message", async (topic, message) => {
                         channel: envelope.packet.channel,
                         packet_id: envelope.packet.id,
                         channel_id: envelope.channelId,
-                        gateway_id: envelope.gatewayId ? convertHexIdToNumericId(envelope.gatewayId) : null,
+                        gateway_id: gatewayNodeId,
                     },
                 });
             } catch (e) {
@@ -1346,21 +1360,15 @@ client.on("message", async (topic, message) => {
             }
 
             try {
+                const mapReportWriteKey = [
+                    envelope.packet.from,
+                    mapReport.longName,
+                    mapReport.shortName,
+                    mapReport.latitudeI,
+                    mapReport.longitudeI,
+                ].join(":");
 
-                // find an existing map with duplicate information created in the last 60 seconds
-                const existingDuplicateMapReport = await prisma.mapReport.findFirst({
-                    where: {
-                        node_id: envelope.packet.from,
-                        long_name: mapReport.longName,
-                        short_name: mapReport.shortName,
-                        created_at: {
-                            gte: new Date(Date.now() - 60000), // created in the last 60 seconds
-                        },
-                    }
-                });
-
-                // create map report if no duplicates found
-                if(!existingDuplicateMapReport){
+                if(!isRecentlySeen(recentMapReportWrites, mapReportWriteKey, MAP_REPORT_WRITE_DEDUPE_WINDOW_MS)){
                     await prisma.mapReport.create({
                         data: {
                             node_id: envelope.packet.from,

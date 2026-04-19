@@ -1,18 +1,11 @@
 <h2 align="center">Meshtastic Map</h2>
 
 <p align="center">
-<a href="https://discord.gg/K55zeZyHKK"><img src="https://img.shields.io/badge/Discord-Liam%20Cottle's%20Discord-%237289DA?style=flat&logo=discord" alt="discord"/></a>
-<a href="https://twitter.com/liamcottle"><img src="https://img.shields.io/badge/Twitter-@liamcottle-%231DA1F2?style=flat&logo=twitter" alt="twitter"/></a>
-<br/>
-<a href="https://ko-fi.com/liamcottle"><img src="https://img.shields.io/badge/Donate%20a%20Coffee-liamcottle-yellow?style=flat&logo=buy-me-a-coffee" alt="donate on ko-fi"/></a>
-<a href="./donate.md"><img src="https://img.shields.io/badge/Donate%20Bitcoin-bc1qy22smke8n4c54evdxmp7lpy9p0e6m9tavtlg2q-%23FF9900?style=flat&logo=bitcoin" alt="donate bitcoin"/></a>
+<a href="https://github.com/Hennes617/meshtastic-map"><img src="https://img.shields.io/badge/GitHub-Hennes617%2Fmeshtastic--map-181717?style=flat&logo=github" alt="github"/></a>
 </p>
 
 A map of all Meshtastic nodes heard via MQTT.
-
-My version of the map is available at https://meshtastic.liamcottle.net
-
-> Check out my new Meshtastic Web Client: [MeshTXT](https://github.com/liamcottle/meshtxt)
+This fork is maintained by Hennes Bolte for self-hosted deployments.
 
 <img src="./screenshot.png">
 
@@ -61,7 +54,7 @@ My version of the map is available at https://meshtastic.liamcottle.net
 Clone the project repo.
 
 ```
-git clone https://github.com/liamcottle/meshtastic-map
+git clone https://github.com/Hennes617/meshtastic-map
 cd meshtastic-map
 ```
 
@@ -216,7 +209,7 @@ npm run test
 
 ## Contributing
 
-If you have a feature request, or find a bug, please [open an issue](https://github.com/liamcottle/meshtastic-map/issues) here on GitHub.
+If you have a feature request, or find a bug, please [open an issue](https://github.com/Hennes617/meshtastic-map/issues) here on GitHub.
 
 ## License
 

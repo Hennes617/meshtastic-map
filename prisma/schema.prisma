@@ -85,6 +85,7 @@ model MapReport {
   @@index(created_at)
   @@index(updated_at)
   @@index(node_id)
+  @@index([node_id, created_at])
   @@map("map_reports")
 }
 
@@ -100,6 +101,7 @@ model NeighbourInfo {
   @@index(created_at)
   @@index(updated_at)
   @@index(node_id)
+  @@index([node_id, created_at])
   @@map("neighbour_infos")
 }
 
@@ -118,6 +120,7 @@ model DeviceMetric {
   @@index(created_at)
   @@index(updated_at)
   @@index(node_id)
+  @@index([node_id, created_at])
   @@map("device_metrics")
 }
 
@@ -145,6 +148,7 @@ model EnvironmentMetric {
   @@index(updated_at)
   @@index(node_id)
   @@index(packet_id)
+  @@index([node_id, created_at])
   @@map("environment_metrics")
 }
 
@@ -167,6 +171,7 @@ model PowerMetric {
   @@index(updated_at)
   @@index(node_id)
   @@index(packet_id)
+  @@index([node_id, created_at])
   @@map("power_metrics")
 }
 
@@ -192,6 +197,7 @@ model Position {
   @@index(updated_at)
   @@index(node_id)
   @@index(packet_id)
+  @@index([node_id, created_at])
   @@map("positions")
 }
 
@@ -210,6 +216,7 @@ model ServiceEnvelope {
   @@index(created_at)
   @@index(updated_at)
   @@index(gateway_id)
+  @@index([gateway_id, mqtt_topic, created_at])
   @@map("service_envelopes")
 }
 
@@ -238,6 +245,8 @@ model TextMessage {
   @@index(from)
   @@index(packet_id)
   @@index(gateway_id)
+  @@index([channel_id, id])
+  @@index([gateway_id, id])
   @@map("text_messages")
 }
 
@@ -263,6 +272,7 @@ model TraceRoute {
   @@index(updated_at)
   @@index(to)
   @@index(from)
+  @@index([to, want_response, id])
   @@map("traceroutes")
 }
 
@@ -294,5 +304,7 @@ model Waypoint {
   @@index(waypoint_id)
   @@index(packet_id)
   @@index(gateway_id)
+  @@index(expire)
+  @@index([from, waypoint_id, id])
   @@map("waypoints")
 }

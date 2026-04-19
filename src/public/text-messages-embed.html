@@ -213,12 +213,11 @@
                         this.hasMorePrevious = false;
                     }
 
-                    // fetch node info
-                    for(const message of messages){
-                        await this.fetchNodeInfo(message.to);
-                        await this.fetchNodeInfo(message.from);
-                        await this.fetchNodeInfo(message.gateway_id);
-                    }
+                    await this.fetchNodeInfos(messages.flatMap((message) => [
+                        message.to,
+                        message.from,
+                        message.gateway_id,
+                    ]));
 
                 } catch(e) {
                     // do nothing
@@ -262,17 +261,47 @@
                         this.scrollToBottom();
                     }
 
-                    // fetch node info
-                    for(const message of messages){
-                        await this.fetchNodeInfo(message.to);
-                        await this.fetchNodeInfo(message.from);
-                        await this.fetchNodeInfo(message.gateway_id);
-                    }
+                    await this.fetchNodeInfos(messages.flatMap((message) => [
+                        message.to,
+                        message.from,
+                        message.gateway_id,
+                    ]));
 
                 } catch(e) {
                     // do nothing
                 } finally {
                     this.isLoadingMore = false;
+                }
+
+            },
+            async fetchNodeInfos(nodeIds) {
+
+                const idsToFetch = [...new Set(
+                    nodeIds
+                        .filter((nodeId) => nodeId != null)
+                        .map((nodeId) => nodeId.toString())
+                )].filter((nodeId) => {
+                    return !(nodeId in this.nodesById) && nodeId !== "4294967295";
+                });
+
+                if(idsToFetch.length === 0){
+                    return;
+                }
+
+                try {
+
+                    const response = await window.axios.get('/api/v1/nodes/by-ids', {
+                        params: {
+                            ids: idsToFetch.join(","),
+                        },
+                    });
+
+                    for(const node of response.data.nodes){
+                        this.nodesById[node.node_id] = node;
+                    }
+
+                } catch(e) {
+                    // do nothing
                 }
 
             },

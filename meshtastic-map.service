@@ -7,9 +7,9 @@ StartLimitIntervalSec=0
 Type=simple
 Restart=always
 RestartSec=1
-User=liamcottle
-WorkingDirectory=/home/liamcottle/meshtastic-map
-ExecStart=/usr/bin/env node /home/liamcottle/meshtastic-map/src/index.js
+User=hennes
+WorkingDirectory=/home/hennes/meshtastic-map
+ExecStart=/usr/bin/env node /home/hennes/meshtastic-map/src/index.js
 
 [Install]
 WantedBy=multi-user.target
