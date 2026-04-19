@@ -103,8 +103,7 @@ if [ "$has_custom_protobuf_path" = false ] && ! printf '%s' "${MQTT_OPTS:-}" | g
   exit 1
 fi
 
-echo "Running migrations"
-npx prisma migrate dev
+sh /app/docker/prisma.sh
 
 echo "Starting mqtt listener"
 exec node src/mqtt.js ${MQTT_OPTS}
