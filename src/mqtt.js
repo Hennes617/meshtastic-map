@@ -229,7 +229,7 @@ const protobufsPath = options["protobufs-path"] ?? path.join(path.dirname(__file
 const mqttBrokerUrl = options["mqtt-broker-url"] ?? "mqtt://mqtt.meshtastic.org";
 const mqttUsername = options["mqtt-username"] ?? "meshdev";
 const mqttPassword = options["mqtt-password"] ?? "large4cats";
-const mqttClientId = options["mqtt-client-id"] ?? null;
+const mqttClientId = options["mqtt-client-id"] ?? `meshtastic-map-${crypto.randomBytes(4).toString("hex")}`;
 const mqttTopics = options["mqtt-topic"] ?? getDefaultMqttTopics(mqttBrokerUrl);
 const allowedPortnums = options["allowed-portnums"] ?? null;
 const logUnknownPortnums = options["log-unknown-portnums"] ?? false;
@@ -266,6 +266,11 @@ const MAP_REPORT_WRITE_DEDUPE_WINDOW_MS = 60000;
 const DEVICE_METRIC_WRITE_DEDUPE_WINDOW_MS = 15000;
 const ENVIRONMENT_METRIC_WRITE_DEDUPE_WINDOW_MS = 15000;
 const POWER_METRIC_WRITE_DEDUPE_WINDOW_MS = 15000;
+const NODE_POSITION_UPDATE_WINDOW_MS = 15000;
+const NODE_TELEMETRY_UPDATE_WINDOW_MS = 15000;
+const NODE_NEIGHBOURS_UPDATE_WINDOW_MS = 15000;
+const MQTT_MESSAGE_PROCESSING_CONCURRENCY = 8;
+const MQTT_MESSAGE_QUEUE_WARNING_THRESHOLD = 5000;
 
 const recentGatewayHeartbeatWrites = new Map();
 const recentPositionWrites = new Map();
@@ -273,6 +278,13 @@ const recentMapReportWrites = new Map();
 const recentDeviceMetricWrites = new Map();
 const recentEnvironmentMetricWrites = new Map();
 const recentPowerMetricWrites = new Map();
+const recentNodePositionUpdates = new Map();
+const recentNodeTelemetryUpdates = new Map();
+const recentNodeNeighbourUpdates = new Map();
+
+const mqttMessageQueue = [];
+let activeMqttMessageProcessors = 0;
+let mqttQueueWarningShown = false;
 
 function isRecentlySeen(cache, key, ttlMs) {
     if(key == null){
@@ -305,6 +317,39 @@ function purgeRecentWriteCaches() {
     purgeExpiredCacheEntries(recentDeviceMetricWrites);
     purgeExpiredCacheEntries(recentEnvironmentMetricWrites);
     purgeExpiredCacheEntries(recentPowerMetricWrites);
+    purgeExpiredCacheEntries(recentNodePositionUpdates);
+    purgeExpiredCacheEntries(recentNodeTelemetryUpdates);
+    purgeExpiredCacheEntries(recentNodeNeighbourUpdates);
+}
+
+function shouldProcessMqttTopic(topic) {
+    const topicSegments = topic.split("/").filter(Boolean);
+    const lastTopicSegment = topicSegments[topicSegments.length - 1] ?? "";
+
+    // Skip helper topics like presence/json on the public broker and only keep
+    // packet uplinks that end in a Meshtastic node id such as !1234abcd.
+    return lastTopicSegment.startsWith("!");
+}
+
+function scheduleMqttMessageProcessing() {
+    while(activeMqttMessageProcessors < MQTT_MESSAGE_PROCESSING_CONCURRENCY && mqttMessageQueue.length > 0){
+        const queuedMessage = mqttMessageQueue.shift();
+        activeMqttMessageProcessors += 1;
+
+        processMqttMessage(queuedMessage.topic, queuedMessage.message)
+            .catch((err) => {
+                console.error("Failed to process MQTT message:", err);
+            })
+            .finally(() => {
+                activeMqttMessageProcessors -= 1;
+
+                if(mqttMessageQueue.length < MQTT_MESSAGE_QUEUE_WARNING_THRESHOLD){
+                    mqttQueueWarningShown = false;
+                }
+
+                scheduleMqttMessageProcessing();
+            });
+    }
 }
 
 async function ensureNodeExists(nodeId) {
@@ -366,6 +411,7 @@ const client = mqtt.connect(mqttBrokerUrl, {
 
 console.log("Starting MQTT collector", {
     mqtt_broker_url: mqttBrokerUrl,
+    mqtt_client_id: mqttClientId,
     mqtt_topics: mqttTopics,
     protobufs_path: protobufsPath,
 });
@@ -830,7 +876,7 @@ client.on("reconnect", () => {
 });
 
 // handle message received
-client.on("message", async (topic, message) => {
+async function processMqttMessage(topic, message) {
     try {
 
         // decode service envelope
@@ -999,19 +1045,29 @@ client.on("message", async (topic, message) => {
 
                 // update node position in db
                 try {
-                    await ensureNodeExists(envelope.packet.from);
-                    await prisma.node.updateMany({
-                        where: {
-                            node_id: envelope.packet.from,
-                        },
-                        data: {
-                            position_updated_at: new Date(),
-                            latitude: position.latitudeI,
-                            longitude: position.longitudeI,
-                            altitude: position.altitude !== 0 ? position.altitude : null,
-                            position_precision: position.precisionBits,
-                        },
-                    });
+                    const nodePositionUpdateKey = [
+                        envelope.packet.from,
+                        position.latitudeI,
+                        position.longitudeI,
+                        position.altitude !== 0 ? position.altitude : "",
+                        position.precisionBits ?? "",
+                    ].join(":");
+
+                    if(!isRecentlySeen(recentNodePositionUpdates, nodePositionUpdateKey, NODE_POSITION_UPDATE_WINDOW_MS)){
+                        await ensureNodeExists(envelope.packet.from);
+                        await prisma.node.updateMany({
+                            where: {
+                                node_id: envelope.packet.from,
+                            },
+                            data: {
+                                position_updated_at: new Date(),
+                                latitude: position.latitudeI,
+                                longitude: position.longitudeI,
+                                altitude: position.altitude !== 0 ? position.altitude : null,
+                                position_precision: position.precisionBits,
+                            },
+                        });
+                    }
                 } catch (e) {
                     console.error(e);
                 }
@@ -1141,22 +1197,27 @@ client.on("message", async (topic, message) => {
 
             // update node neighbour info in db
             try {
-                await ensureNodeExists(envelope.packet.from);
-                await prisma.node.updateMany({
-                    where: {
-                        node_id: envelope.packet.from,
-                    },
-                    data: {
-                        neighbours_updated_at: new Date(),
-                        neighbour_broadcast_interval_secs: neighbourInfo.nodeBroadcastIntervalSecs,
-                        neighbours: neighbourInfo.neighbors.map((neighbour) => {
-                            return {
-                                node_id: neighbour.nodeId,
-                                snr: neighbour.snr,
-                            };
-                        }),
-                    },
+                const neighbours = neighbourInfo.neighbors.map((neighbour) => {
+                    return {
+                        node_id: neighbour.nodeId,
+                        snr: neighbour.snr,
+                    };
                 });
+                const nodeNeighbourUpdateKey = `${envelope.packet.from}:${JSON.stringify(neighbours)}`;
+
+                if(!isRecentlySeen(recentNodeNeighbourUpdates, nodeNeighbourUpdateKey, NODE_NEIGHBOURS_UPDATE_WINDOW_MS)){
+                    await ensureNodeExists(envelope.packet.from);
+                    await prisma.node.updateMany({
+                        where: {
+                            node_id: envelope.packet.from,
+                        },
+                        data: {
+                            neighbours_updated_at: new Date(),
+                            neighbour_broadcast_interval_secs: neighbourInfo.nodeBroadcastIntervalSecs,
+                            neighbours: neighbours,
+                        },
+                    });
+                }
             } catch (e) {
                 console.error(e);
             }
@@ -1325,13 +1386,16 @@ client.on("message", async (topic, message) => {
             // update node telemetry in db
             if(Object.keys(data).length > 0){
                 try {
-                    await ensureNodeExists(envelope.packet.from);
-                    await prisma.node.updateMany({
-                        where: {
-                            node_id: envelope.packet.from,
-                        },
-                        data: data,
-                    });
+                    const nodeTelemetryUpdateKey = `${envelope.packet.from}:${JSON.stringify(data)}`;
+                    if(!isRecentlySeen(recentNodeTelemetryUpdates, nodeTelemetryUpdateKey, NODE_TELEMETRY_UPDATE_WINDOW_MS)){
+                        await ensureNodeExists(envelope.packet.from);
+                        await prisma.node.updateMany({
+                            where: {
+                                node_id: envelope.packet.from,
+                            },
+                            data: data,
+                        });
+                    }
                 } catch (e) {
                     console.error(e);
                 }
@@ -1488,4 +1552,22 @@ client.on("message", async (topic, message) => {
     } catch(e) {
         // ignore errors
     }
+}
+
+client.on("message", (topic, message) => {
+    if(!shouldProcessMqttTopic(topic)){
+        return;
+    }
+
+    mqttMessageQueue.push({
+        topic: topic,
+        message: Buffer.from(message),
+    });
+
+    if(mqttMessageQueue.length >= MQTT_MESSAGE_QUEUE_WARNING_THRESHOLD && !mqttQueueWarningShown){
+        mqttQueueWarningShown = true;
+        console.warn(`MQTT message queue length is ${mqttMessageQueue.length}. Collector is under heavy load.`);
+    }
+
+    scheduleMqttMessageProcessing();
 });
