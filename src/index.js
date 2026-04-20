@@ -4,6 +4,7 @@ const express = require('express');
 const compression = require('compression');
 const commandLineArgs = require("command-line-args");
 const commandLineUsage = require("command-line-usage");
+const { loadHardwareModels } = require("./utils/hardware_models");
 
 // create prisma db client
 const { PrismaClient } = require("@prisma/client");
@@ -51,7 +52,7 @@ if(options.help){
 const port = options["port"] ?? 8080;
 
 // load json
-const hardwareModels = JSON.parse(fs.readFileSync(path.join(__dirname, "json/hardware_models.json"), "utf-8"));
+const hardwareModels = loadHardwareModels();
 const roles = JSON.parse(fs.readFileSync(path.join(__dirname, "json/roles.json"), "utf-8"));
 const regionCodes = JSON.parse(fs.readFileSync(path.join(__dirname, "json/region_codes.json"), "utf-8"));
 const modemPresets = JSON.parse(fs.readFileSync(path.join(__dirname, "json/modem_presets.json"), "utf-8"));
@@ -66,6 +67,7 @@ const deviceImageBasenameAliases = new Map(
         "HELTEC_HT62": "heltec-ht62-esp32c3-sx1262",
         "HELTEC_MESH_NODE_T114": "heltec-mesh-node-t114",
         "HELTEC_MESH_POCKET": "heltec_mesh_pocket",
+        "HELTEC_MESH_SOLAR": "heltec-mesh-solar",
         "HELTEC_SENSOR_HUB": "heltec-mesh-solar",
         "HELTEC_V3": "heltec-v3",
         "HELTEC_V4": "heltec_v4",
@@ -79,6 +81,8 @@ const deviceImageBasenameAliases = new Map(
         "HELTEC_WIRELESS_TRACKER_V2": "heltec_wireless_tracker_v2",
         "HELTEC_WSL_V3": "heltec-wsl-v3",
         "LILYGO_TBEAM_S3_CORE": "tbeam-s3-core",
+        "M5STACK_C6L": "m5_c6l",
+        "M5STACK_CARDPUTER_ADV": "m5stack_cardputer",
         "NANO_G2_ULTRA": "nano-g2-ultra",
         "NOMADSTAR_METEOR_PRO": "meteor_pro",
         "PRIVATE_HW": "diy",
@@ -97,6 +101,7 @@ const deviceImageBasenameAliases = new Map(
         "T_DECK": "t-deck",
         "T_DECK_PRO": "tdeck_pro",
         "T_ECHO": "t-echo",
+        "T_ECHO_LITE": "techo_lite",
         "TLORA_C6": "tlora-c6",
         "TLORA_V2_1_1P6": "tlora-v2-1-1_6",
         "TLORA_V2_1_1P8": "tlora-v2-1-1_8",

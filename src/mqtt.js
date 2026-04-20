@@ -297,15 +297,15 @@ const mqttUsername = options["mqtt-username"] ?? "meshdev";
 const mqttPassword = options["mqtt-password"] ?? "large4cats";
 const mqttClientId = options["mqtt-client-id"] ?? `meshtastic-map-${crypto.randomBytes(4).toString("hex")}`;
 const mqttTopics = options["mqtt-topic"] ?? getDefaultMqttTopics(mqttBrokerUrl);
+const identityNameFailsafeUrl = options["identity-name-failsafe-url"] ?? "https://meshmap.net/nodes.json";
 const identitySourceUrls = [...new Set(options["identity-source-url"] ?? [
-    "https://meshtastic.pugetmesh.org/api/v1/nodes",
-    "https://meshmap.ro/api/v1/nodes",
+    identityNameFailsafeUrl,
 ])];
 const identitySyncIntervalSeconds = options["identity-sync-interval-seconds"] ?? 21600;
-const identityNameFailsafeUrl = options["identity-name-failsafe-url"] ?? "https://meshmap.net/nodes.json";
 const hasIdentityFailsafeSource = Boolean(identityNameFailsafeUrl);
 const hasExternalIdentitySources = identitySourceUrls.length > 0;
-const hasIdentitySyncSources = hasExternalIdentitySources || hasIdentityFailsafeSource;
+const hasSeparateIdentityFailsafeSource = hasIdentityFailsafeSource && !identitySourceUrls.includes(identityNameFailsafeUrl);
+const hasIdentitySyncSources = hasExternalIdentitySources || hasSeparateIdentityFailsafeSource;
 const allowedNodeIds = parseNodeIdFilters(options["allowed-node-ids"] ?? null);
 const mqttProcessingConcurrency = Math.max(1, options["mqtt-processing-concurrency"] ?? 16);
 const allowedPortnums = options["allowed-portnums"] ?? null;
@@ -350,6 +350,9 @@ const MQTT_MESSAGE_DEDUPE_WINDOW_MS = 30000;
 const MQTT_MESSAGE_PROCESSING_CONCURRENCY = mqttProcessingConcurrency;
 const MQTT_MESSAGE_QUEUE_WARNING_THRESHOLD = 5000;
 const MQTT_PACKET_TOPIC_REGEX = /^msh(?:\/[^/]+)+\/2\/(?:e\/[^/]+\/![0-9a-f]+|map\/)$/i;
+const IDENTITY_WARMUP_SYNC_DELAY_MS = 60000;
+const IDENTITY_EXPEDITED_SYNC_DELAY_MS = 30000;
+const IDENTITY_EXPEDITED_SYNC_MIN_INTERVAL_MS = 60000;
 
 const recentGatewayHeartbeatWrites = new Map();
 const recentPositionWrites = new Map();
@@ -584,19 +587,16 @@ async function ensureNodeExists(nodeId) {
     }
 
     try {
-        await prisma.node.upsert({
-            where: {
-                node_id: nodeId,
-            },
-            create: {
+        await prisma.node.create({
+            data: {
                 node_id: nodeId,
                 long_name: "",
                 short_name: "",
                 hardware_model: 0,
                 role: 0,
             },
-            update: {},
         });
+        scheduleIdentitySync("blank-node-created");
     } catch(err) {
         // ignore races where another packet creates the same node concurrently
     }
@@ -611,6 +611,40 @@ if(typeof recentWriteCacheCleanupInterval.unref === "function"){
 }
 
 let identitySyncInFlight = false;
+let lastIdentitySyncStartedAt = 0;
+let pendingIdentitySyncTimeout = null;
+
+function scheduleIdentitySync(reason, delayMs = IDENTITY_EXPEDITED_SYNC_DELAY_MS, options = {}) {
+    const {
+        ignoreRecentSyncCooldown = false,
+    } = options;
+
+    if(!hasIdentitySyncSources || pendingIdentitySyncTimeout != null){
+        return;
+    }
+
+    const msSinceLastSync = Date.now() - lastIdentitySyncStartedAt;
+    const cooldownDelayMs = ignoreRecentSyncCooldown
+        ? 0
+        : Math.max(0, IDENTITY_EXPEDITED_SYNC_MIN_INTERVAL_MS - msSinceLastSync);
+    const effectiveDelayMs = Math.max(delayMs, cooldownDelayMs);
+
+    console.log("Scheduling identity sync", {
+        reason: reason,
+        delay_ms: effectiveDelayMs,
+    });
+
+    pendingIdentitySyncTimeout = setTimeout(() => {
+        pendingIdentitySyncTimeout = null;
+        syncExternalNodeIdentities().catch((err) => {
+            console.warn(`Scheduled identity sync failed (${reason}): ${err.message}`);
+        });
+    }, effectiveDelayMs);
+
+    if(typeof pendingIdentitySyncTimeout.unref === "function"){
+        pendingIdentitySyncTimeout.unref();
+    }
+}
 
 async function countNodesMissingFixedNames() {
     const nodes = await prisma.node.findMany({
@@ -636,6 +670,7 @@ async function syncExternalNodeIdentities() {
     }
 
     identitySyncInFlight = true;
+    lastIdentitySyncStartedAt = Date.now();
 
     try {
         for(const identitySourceUrl of identitySourceUrls){
@@ -651,7 +686,7 @@ async function syncExternalNodeIdentities() {
             }
         }
 
-        if(hasIdentityFailsafeSource){
+        if(hasSeparateIdentityFailsafeSource){
             const nodesMissingIdentityFields = await countNodesMissingFixedNames();
             if(nodesMissingIdentityFields > 0){
                 try {
@@ -709,7 +744,7 @@ console.log("Starting MQTT collector", {
     identity_name_failsafe_url: identityNameFailsafeUrl,
     identity_sync_enabled: hasIdentitySyncSources && identitySyncIntervalSeconds > 0,
     identity_sync_has_external_sources: hasExternalIdentitySources,
-    identity_sync_has_failsafe_source: hasIdentityFailsafeSource,
+    identity_sync_has_failsafe_source: hasSeparateIdentityFailsafeSource,
     allowed_node_ids_count: allowedNodeIds?.size ?? 0,
     protobufs_path: protobufsPath,
 });
@@ -749,6 +784,10 @@ if(purgeIntervalSeconds){
 if(identitySyncIntervalSeconds > 0 && hasIdentitySyncSources){
     syncExternalNodeIdentities().catch((err) => {
         console.warn(`Initial external node identity sync failed: ${err.message}`);
+    });
+
+    scheduleIdentitySync("startup-warmup", IDENTITY_WARMUP_SYNC_DELAY_MS, {
+        ignoreRecentSyncCooldown: true,
     });
 
     const identitySyncInterval = setInterval(() => {

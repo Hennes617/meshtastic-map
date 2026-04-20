@@ -1,13 +1,8 @@
 const fs = require("fs");
 const NodeIdUtil = require("./node_id_util");
+const { getHardwareModelIdsByName } = require("./hardware_models");
 
-const hardwareModels = JSON.parse(
-    fs.readFileSync(`${__dirname}/../json/hardware_models.json`, "utf-8")
-);
-
-const hardwareModelIdsByName = new Map(
-    Object.entries(hardwareModels).map(([id, name]) => [name, Number.parseInt(id, 10)])
-);
+const hardwareModelIdsByName = getHardwareModelIdsByName();
 
 function getMeaningfulString(value) {
     if(typeof value !== "string"){
@@ -359,6 +354,7 @@ async function importNodeIdentitiesFromUrl(prisma, url, options = {}) {
         response = await fetch(url, {
             headers: {
                 "accept": "application/json",
+                "user-agent": "meshtastic-map/1.0",
             },
             signal: abortController.signal,
         });
