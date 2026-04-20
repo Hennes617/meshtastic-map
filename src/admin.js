@@ -33,6 +33,11 @@ const optionsList = [
         description: "Repairs blank node names and unknown hardware models from saved map reports.",
     },
     {
+        name: "purge-duplicate-nodes-by-position",
+        type: Boolean,
+        description: "Purges duplicate node records that share the same latitude and longitude, keeping the most recently updated node.",
+    },
+    {
         name: "import-node-identities-url",
         type: String,
         description: "Imports node identities from a JSON API URL.",
@@ -66,6 +71,7 @@ if(options.help){
 // get options and fallback to default values
 const purgeNodeId = options["purge-node-id"] ?? null;
 const repairNodeIdentities = options["repair-node-identities"] ?? false;
+const purgeDuplicateNodesByPosition = options["purge-duplicate-nodes-by-position"] ?? false;
 const importNodeIdentitiesUrl = options["import-node-identities-url"] ?? null;
 const importNodeIdentitiesFile = options["import-node-identities-file"] ?? null;
 
@@ -298,6 +304,85 @@ async function repairNodeIdentitiesFromMapReports() {
     }
 }
 
+async function purgeDuplicateNodesByLocation() {
+    const duplicateCoordinateGroups = await prisma.node.groupBy({
+        by: ["latitude", "longitude"],
+        where: {
+            latitude: {
+                not: null,
+            },
+            longitude: {
+                not: null,
+            },
+        },
+        _count: {
+            _all: true,
+        },
+        having: {
+            latitude: {
+                _count: {
+                    gt: 1,
+                },
+            },
+        },
+        orderBy: {
+            _count: {
+                latitude: "desc",
+            },
+        },
+    });
+
+    if(duplicateCoordinateGroups.length === 0){
+        console.log("No duplicate node locations found.");
+        return;
+    }
+
+    let purgedNodesCount = 0;
+    for(const duplicateGroup of duplicateCoordinateGroups){
+        const nodesAtCoordinate = await prisma.node.findMany({
+            where: {
+                latitude: duplicateGroup.latitude,
+                longitude: duplicateGroup.longitude,
+            },
+            select: {
+                node_id: true,
+                position_updated_at: true,
+                updated_at: true,
+                created_at: true,
+                id: true,
+            },
+            orderBy: [
+                {
+                    position_updated_at: "desc",
+                },
+                {
+                    updated_at: "desc",
+                },
+                {
+                    created_at: "desc",
+                },
+                {
+                    id: "desc",
+                },
+            ],
+        });
+
+        const [nodeToKeep, ...nodesToPurge] = nodesAtCoordinate;
+        if(nodeToKeep == null || nodesToPurge.length === 0){
+            continue;
+        }
+
+        console.log(`Keeping node ${nodeToKeep.node_id.toString()} at (${duplicateGroup.latitude}, ${duplicateGroup.longitude}) and purging ${nodesToPurge.length} duplicate(s).`);
+
+        for(const nodeToPurge of nodesToPurge){
+            await purgeNodeById(nodeToPurge.node_id);
+            purgedNodesCount += 1;
+        }
+    }
+
+    console.log(`✅ Finished purging duplicate node locations. Removed ${purgedNodesCount} duplicate node(s) across ${duplicateCoordinateGroups.length} location group(s).`);
+}
+
 (async () => {
     try {
 
@@ -308,6 +393,10 @@ async function repairNodeIdentitiesFromMapReports() {
 
         if(repairNodeIdentities){
             await repairNodeIdentitiesFromMapReports();
+        }
+
+        if(purgeDuplicateNodesByPosition){
+            await purgeDuplicateNodesByLocation();
         }
 
         if(importNodeIdentitiesFile){
