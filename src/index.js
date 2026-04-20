@@ -55,10 +55,66 @@ const hardwareModels = JSON.parse(fs.readFileSync(path.join(__dirname, "json/har
 const roles = JSON.parse(fs.readFileSync(path.join(__dirname, "json/roles.json"), "utf-8"));
 const regionCodes = JSON.parse(fs.readFileSync(path.join(__dirname, "json/region_codes.json"), "utf-8"));
 const modemPresets = JSON.parse(fs.readFileSync(path.join(__dirname, "json/modem_presets.json"), "utf-8"));
-const availableDeviceImages = new Set(
-    fs.readdirSync(path.join(__dirname, "public/images/devices"))
-        .map((filename) => path.parse(filename).name)
+const deviceImagesDirectory = path.join(__dirname, "public/images/devices");
+const availableDeviceImageFiles = listDeviceImageFiles(deviceImagesDirectory)
+    .filter((filename) => {
+        const extension = path.extname(filename).toLowerCase();
+        return [".svg", ".png", ".jpg", ".jpeg", ".webp", ".gif"].includes(extension);
+    });
+const deviceImageBasenameAliases = new Map(
+    Object.entries({
+        "HELTEC_HT62": "heltec-ht62-esp32c3-sx1262",
+        "HELTEC_MESH_NODE_T114": "heltec-mesh-node-t114",
+        "HELTEC_MESH_POCKET": "heltec_mesh_pocket",
+        "HELTEC_SENSOR_HUB": "heltec-mesh-solar",
+        "HELTEC_V3": "heltec-v3",
+        "HELTEC_V4": "heltec_v4",
+        "HELTEC_VISION_MASTER_E213": "heltec-vision-master-e213",
+        "HELTEC_VISION_MASTER_E290": "heltec-vision-master-e290",
+        "HELTEC_VISION_MASTER_T190": "heltec-vision-master-t190",
+        "HELTEC_WIRELESS_PAPER": "heltec-wireless-paper",
+        "HELTEC_WIRELESS_PAPER_V1_0": "heltec-wireless-paper-V1_0",
+        "HELTEC_WIRELESS_TRACKER": "heltec-wireless-tracker",
+        "HELTEC_WIRELESS_TRACKER_V1_0": "heltec-wireless-tracker-V1-0",
+        "HELTEC_WIRELESS_TRACKER_V2": "heltec_wireless_tracker_v2",
+        "HELTEC_WSL_V3": "heltec-wsl-v3",
+        "LILYGO_TBEAM_S3_CORE": "tbeam-s3-core",
+        "NANO_G2_ULTRA": "nano-g2-ultra",
+        "NOMADSTAR_METEOR_PRO": "meteor_pro",
+        "PRIVATE_HW": "diy",
+        "RAK11200": "rak11200",
+        "RAK11310": "rak11310",
+        "RAK2560": "rak2560",
+        "RAK4631": "rak4631",
+        "RPI_PICO": "pico",
+        "RPI_PICO2": "pico",
+        "SEEED_SOLAR_NODE": "seeed_solar",
+        "SEEED_WIO_TRACKER_L1": "wio_tracker_l1",
+        "SEEED_WIO_TRACKER_L1_EINK": "wio_tracker_l1_eink",
+        "SEEED_XIAO_S3": "seeed-xiao-s3",
+        "SENSECAP_INDICATOR": "seeed-sensecap-indicator",
+        "STATION_G2": "station-g2",
+        "T_DECK": "t-deck",
+        "T_DECK_PRO": "tdeck_pro",
+        "T_ECHO": "t-echo",
+        "TLORA_C6": "tlora-c6",
+        "TLORA_V2_1_1P6": "tlora-v2-1-1_6",
+        "TLORA_V2_1_1P8": "tlora-v2-1-1_8",
+        "TRACKER_T1000_E": "tracker-t1000-e",
+        "WIO_WM1110": "wio-tracker-wm1110",
+        "WISMESH_TAP": "rak-wismeshtap",
+        "XIAO_NRF52_KIT": "seeed_xiao_nrf52_kit",
+    }).map(([hardwareModelName, basename]) => [hardwareModelName, basename])
 );
+const deviceImageFilesByBasename = buildPreferredImageMap(
+    availableDeviceImageFiles,
+    (filename) => path.parse(filename).name
+);
+const deviceImageFilesByNormalizedName = buildPreferredImageMap(
+    availableDeviceImageFiles,
+    (filename) => normalizeDeviceImageKey(path.parse(filename).name)
+);
+const availableDeviceImageBasenames = new Set(deviceImageFilesByBasename.keys());
 
 // The map only needs a subset of the node columns during the initial load.
 const mapNodeSelect = {
@@ -143,16 +199,110 @@ function getHardwareModelName(hardwareModel) {
     return hardwareModelName;
 }
 
+function listDeviceImageFiles(directory, subdirectory = "") {
+    const currentDirectory = subdirectory ? path.join(directory, subdirectory) : directory;
+    const entries = fs.readdirSync(currentDirectory, { withFileTypes: true });
+    const imageFiles = [];
+
+    for(const entry of entries){
+        const relativePath = subdirectory ? path.posix.join(subdirectory, entry.name) : entry.name;
+        if(entry.isDirectory()){
+            imageFiles.push(...listDeviceImageFiles(directory, relativePath));
+            continue;
+        }
+
+        imageFiles.push(relativePath);
+    }
+
+    return imageFiles;
+}
+
+function normalizeDeviceImageKey(value) {
+    return value
+        .toString()
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "");
+}
+
+function getDeviceImagePriority(filename) {
+    const extension = path.extname(filename).toLowerCase();
+    const extensionPriority = {
+        ".svg": 30,
+        ".png": 20,
+        ".webp": 15,
+        ".jpg": 10,
+        ".jpeg": 10,
+        ".gif": 5,
+    };
+
+    let priority = extensionPriority[extension] ?? 0;
+
+    if(!filename.startsWith("old_images/")){
+        priority += 100;
+    }
+
+    priority -= filename.split("/").length;
+
+    return priority;
+}
+
+function buildPreferredImageMap(filenames, keySelector) {
+    const imageMap = new Map();
+
+    for(const filename of filenames){
+        const key = keySelector(filename);
+        const existingFilename = imageMap.get(key) ?? null;
+
+        if(existingFilename == null || getDeviceImagePriority(filename) > getDeviceImagePriority(existingFilename)){
+            imageMap.set(key, filename);
+        }
+    }
+
+    return imageMap;
+}
+
+function getResolvedDeviceImageFile(hardwareModelName) {
+    if(hardwareModelName == null){
+        return deviceImageFilesByBasename.get("unknown-new") ?? null;
+    }
+
+    const aliasedBasename = deviceImageBasenameAliases.get(hardwareModelName) ?? null;
+    if(aliasedBasename != null && deviceImageFilesByBasename.has(aliasedBasename)){
+        return deviceImageFilesByBasename.get(aliasedBasename);
+    }
+
+    if(deviceImageFilesByBasename.has(hardwareModelName)){
+        return deviceImageFilesByBasename.get(hardwareModelName);
+    }
+
+    const normalizedHardwareModelName = normalizeDeviceImageKey(hardwareModelName);
+    if(deviceImageFilesByNormalizedName.has(normalizedHardwareModelName)){
+        return deviceImageFilesByNormalizedName.get(normalizedHardwareModelName);
+    }
+
+    for(const basename of availableDeviceImageBasenames){
+        const normalizedBasename = normalizeDeviceImageKey(basename);
+        if(normalizedHardwareModelName.includes(normalizedBasename)
+            || normalizedBasename.includes(normalizedHardwareModelName)){
+            return deviceImageFilesByBasename.get(basename);
+        }
+    }
+
+    return deviceImageFilesByBasename.get("unknown-new") ?? null;
+}
+
 function getHardwareImageUrl(hardwareModelName) {
-    if(availableDeviceImages.has(hardwareModelName)){
-        return `/images/devices/${hardwareModelName}.png`;
+    const resolvedDeviceImageFile = getResolvedDeviceImageFile(hardwareModelName);
+    if(resolvedDeviceImageFile != null){
+        return `/images/devices/${resolvedDeviceImageFile}`;
     }
 
     return "/images/no_image.png";
 }
 
 function hasHardwareImage(hardwareModelName) {
-    return availableDeviceImages.has(hardwareModelName);
+    return getResolvedDeviceImageFile(hardwareModelName) != null;
 }
 
 function formatNodeInfo(node) {
