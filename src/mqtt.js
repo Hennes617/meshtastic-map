@@ -292,8 +292,10 @@ const POWER_METRIC_WRITE_DEDUPE_WINDOW_MS = 15000;
 const NODE_POSITION_UPDATE_WINDOW_MS = 15000;
 const NODE_TELEMETRY_UPDATE_WINDOW_MS = 15000;
 const NODE_NEIGHBOURS_UPDATE_WINDOW_MS = 15000;
+const MQTT_MESSAGE_DEDUPE_WINDOW_MS = 30000;
 const MQTT_MESSAGE_PROCESSING_CONCURRENCY = mqttProcessingConcurrency;
 const MQTT_MESSAGE_QUEUE_WARNING_THRESHOLD = 5000;
+const MQTT_PACKET_TOPIC_REGEX = /^msh(?:\/[^/]+)+\/2\/e\/[^/]+\/![0-9a-f]+$/i;
 
 const recentGatewayHeartbeatWrites = new Map();
 const recentPositionWrites = new Map();
@@ -304,6 +306,7 @@ const recentPowerMetricWrites = new Map();
 const recentNodePositionUpdates = new Map();
 const recentNodeTelemetryUpdates = new Map();
 const recentNodeNeighbourUpdates = new Map();
+const recentMqttMessages = new Map();
 
 const mqttMessageQueue = [];
 let activeMqttMessageProcessors = 0;
@@ -477,15 +480,13 @@ function purgeRecentWriteCaches() {
     purgeExpiredCacheEntries(recentNodePositionUpdates);
     purgeExpiredCacheEntries(recentNodeTelemetryUpdates);
     purgeExpiredCacheEntries(recentNodeNeighbourUpdates);
+    purgeExpiredCacheEntries(recentMqttMessages);
 }
 
 function shouldProcessMqttTopic(topic) {
-    const topicSegments = topic.split("/").filter(Boolean);
-    const lastTopicSegment = topicSegments[topicSegments.length - 1] ?? "";
-
-    // Skip helper topics like presence/json on the public broker and only keep
-    // packet uplinks that end in a Meshtastic node id such as !1234abcd.
-    return lastTopicSegment.startsWith("!");
+    // Keep only packet uplink topics that match Meshtastic envelope topics.
+    // Example: msh/US/2/e/LongFast/!1234abcd
+    return MQTT_PACKET_TOPIC_REGEX.test(topic);
 }
 
 function scheduleMqttMessageProcessing() {
@@ -1710,6 +1711,15 @@ async function processMqttMessage(topic, message) {
 
 client.on("message", (topic, message) => {
     if(!shouldProcessMqttTopic(topic)){
+        return;
+    }
+
+    const mqttMessageHash = crypto
+        .createHash("sha1")
+        .update(topic)
+        .update(message)
+        .digest("hex");
+    if(isRecentlySeen(recentMqttMessages, mqttMessageHash, MQTT_MESSAGE_DEDUPE_WINDOW_MS)){
         return;
     }
 
