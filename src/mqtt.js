@@ -303,6 +303,9 @@ const identitySourceUrls = [...new Set(options["identity-source-url"] ?? [
 ])];
 const identitySyncIntervalSeconds = options["identity-sync-interval-seconds"] ?? 21600;
 const identityNameFailsafeUrl = options["identity-name-failsafe-url"] ?? "https://meshmap.net/nodes.json";
+const hasIdentityFailsafeSource = Boolean(identityNameFailsafeUrl);
+const hasExternalIdentitySources = identitySourceUrls.length > 0;
+const hasIdentitySyncSources = hasExternalIdentitySources || hasIdentityFailsafeSource;
 const allowedNodeIds = parseNodeIdFilters(options["allowed-node-ids"] ?? null);
 const mqttProcessingConcurrency = Math.max(1, options["mqtt-processing-concurrency"] ?? 16);
 const allowedPortnums = options["allowed-portnums"] ?? null;
@@ -628,7 +631,7 @@ async function countNodesMissingFixedNames() {
 }
 
 async function syncExternalNodeIdentities() {
-    if(identitySyncInFlight || (identitySourceUrls.length === 0 && !identityNameFailsafeUrl)){
+    if(identitySyncInFlight || !hasIdentitySyncSources){
         return;
     }
 
@@ -648,7 +651,7 @@ async function syncExternalNodeIdentities() {
             }
         }
 
-        if(identityNameFailsafeUrl){
+        if(hasIdentityFailsafeSource){
             const nodesMissingIdentityFields = await countNodesMissingFixedNames();
             if(nodesMissingIdentityFields > 0){
                 try {
@@ -704,6 +707,9 @@ console.log("Starting MQTT collector", {
     identity_source_urls: identitySourceUrls,
     identity_sync_interval_seconds: identitySyncIntervalSeconds,
     identity_name_failsafe_url: identityNameFailsafeUrl,
+    identity_sync_enabled: hasIdentitySyncSources && identitySyncIntervalSeconds > 0,
+    identity_sync_has_external_sources: hasExternalIdentitySources,
+    identity_sync_has_failsafe_source: hasIdentityFailsafeSource,
     allowed_node_ids_count: allowedNodeIds?.size ?? 0,
     protobufs_path: protobufsPath,
 });
@@ -740,7 +746,7 @@ if(purgeIntervalSeconds){
     }, purgeIntervalSeconds * 1000);
 }
 
-if(identitySyncIntervalSeconds > 0 && identitySourceUrls.length > 0){
+if(identitySyncIntervalSeconds > 0 && hasIdentitySyncSources){
     syncExternalNodeIdentities().catch((err) => {
         console.warn(`Initial external node identity sync failed: ${err.message}`);
     });
