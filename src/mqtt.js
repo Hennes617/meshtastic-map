@@ -73,6 +73,11 @@ const optionsList = [
         description: "How often to sync missing node identities from external JSON APIs.",
     },
     {
+        name: "identity-name-failsafe-url",
+        type: String,
+        description: "Fallback JSON API URL used only to fill missing long and short names.",
+    },
+    {
         name: "allowed-node-ids",
         type: String,
         multiple: true,
@@ -297,6 +302,7 @@ const identitySourceUrls = [...new Set(options["identity-source-url"] ?? [
     "https://meshmap.ro/api/v1/nodes",
 ])];
 const identitySyncIntervalSeconds = options["identity-sync-interval-seconds"] ?? 21600;
+const identityNameFailsafeUrl = options["identity-name-failsafe-url"] ?? "https://meshmap.net/nodes.json";
 const allowedNodeIds = parseNodeIdFilters(options["allowed-node-ids"] ?? null);
 const mqttProcessingConcurrency = Math.max(1, options["mqtt-processing-concurrency"] ?? 16);
 const allowedPortnums = options["allowed-portnums"] ?? null;
@@ -603,8 +609,26 @@ if(typeof recentWriteCacheCleanupInterval.unref === "function"){
 
 let identitySyncInFlight = false;
 
+async function countNodesMissingFixedNames() {
+    const nodes = await prisma.node.findMany({
+        select: {
+            node_id: true,
+            long_name: true,
+            short_name: true,
+            hardware_model: true,
+        },
+    });
+
+    return nodes.filter((node) => {
+        return getMeaningfulLongName(node.long_name) == null
+            || getMeaningfulShortName(node.short_name, node.node_id) == null
+            || !Number.isInteger(node.hardware_model)
+            || node.hardware_model <= 0;
+    }).length;
+}
+
 async function syncExternalNodeIdentities() {
-    if(identitySyncInFlight || identitySourceUrls.length === 0){
+    if(identitySyncInFlight || (identitySourceUrls.length === 0 && !identityNameFailsafeUrl)){
         return;
     }
 
@@ -621,6 +645,26 @@ async function syncExternalNodeIdentities() {
                 });
             } catch(err) {
                 console.warn(`External node identity sync failed for ${identitySourceUrl}: ${err.message}`);
+            }
+        }
+
+        if(identityNameFailsafeUrl){
+            const nodesMissingIdentityFields = await countNodesMissingFixedNames();
+            if(nodesMissingIdentityFields > 0){
+                try {
+                    const result = await importNodeIdentitiesFromUrl(prisma, identityNameFailsafeUrl, {
+                        allowedFields: ["long_name", "short_name", "hardware_model"],
+                        timeout_ms: 30000,
+                    });
+                    console.log("Identity name failsafe sync completed", {
+                        source: result.source_label,
+                        imported_count: result.imported_count,
+                        skipped_count: result.skipped_count,
+                        nodes_missing_identity_fields_before_sync: nodesMissingIdentityFields,
+                    });
+                } catch(err) {
+                    console.warn(`Identity name failsafe sync failed for ${identityNameFailsafeUrl}: ${err.message}`);
+                }
             }
         }
     } finally {
@@ -659,6 +703,7 @@ console.log("Starting MQTT collector", {
     mqtt_topics: mqttTopics,
     identity_source_urls: identitySourceUrls,
     identity_sync_interval_seconds: identitySyncIntervalSeconds,
+    identity_name_failsafe_url: identityNameFailsafeUrl,
     allowed_node_ids_count: allowedNodeIds?.size ?? 0,
     protobufs_path: protobufsPath,
 });

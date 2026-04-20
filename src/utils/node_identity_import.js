@@ -1,6 +1,14 @@
 const fs = require("fs");
 const NodeIdUtil = require("./node_id_util");
 
+const hardwareModels = JSON.parse(
+    fs.readFileSync(`${__dirname}/../json/hardware_models.json`, "utf-8")
+);
+
+const hardwareModelIdsByName = new Map(
+    Object.entries(hardwareModels).map(([id, name]) => [name, Number.parseInt(id, 10)])
+);
+
 function getMeaningfulString(value) {
     if(typeof value !== "string"){
         return null;
@@ -24,11 +32,40 @@ function getMeaningfulLongName(value) {
         return null;
     }
 
+    if(/^Meshtastic\s+[0-9A-Fa-f]{4,8}$/.test(longName)){
+        return null;
+    }
+
     return longName;
 }
 
 function hasKnownHardwareModel(value) {
     return Number.isInteger(value) && value > 0;
+}
+
+function getImportedHardwareModel(value) {
+    if(hasKnownHardwareModel(value)){
+        return value;
+    }
+
+    const hardwareModelName = getMeaningfulString(value);
+    if(hardwareModelName == null){
+        return null;
+    }
+
+    if(/^\d+$/.test(hardwareModelName)){
+        const numericHardwareModel = Number.parseInt(hardwareModelName, 10);
+        if(hasKnownHardwareModel(numericHardwareModel)){
+            return numericHardwareModel;
+        }
+    }
+
+    const hardwareModelId = hardwareModelIdsByName.get(hardwareModelName.toUpperCase());
+    if(hasKnownHardwareModel(hardwareModelId)){
+        return hardwareModelId;
+    }
+
+    return null;
 }
 
 function isMeaningfulImportedLongName(value) {
@@ -61,7 +98,7 @@ function getImportedNodeId(sourceNode) {
 
 function getImportedShortName(sourceNode, nodeId) {
     return getMeaningfulShortName(
-        sourceNode?.raw_short_name ?? sourceNode?.short_name,
+        sourceNode?.raw_short_name ?? sourceNode?.short_name ?? sourceNode?.shortName,
         nodeId,
     );
 }
@@ -83,12 +120,12 @@ function getMeaningfulShortName(value, nodeId) {
 }
 
 function getImportedLongName(sourceNode) {
-    const rawLongName = getMeaningfulLongName(sourceNode?.raw_long_name);
+    const rawLongName = getMeaningfulLongName(sourceNode?.raw_long_name ?? sourceNode?.rawLongName);
     if(rawLongName != null){
         return rawLongName;
     }
 
-    return isMeaningfulImportedLongName(sourceNode?.long_name);
+    return isMeaningfulImportedLongName(sourceNode?.long_name ?? sourceNode?.longName);
 }
 
 function getExistingLongName(value) {
@@ -112,38 +149,77 @@ function getImportedNodesFromPayload(payload) {
         return payload.data.nodes;
     }
 
+    if(payload != null && typeof payload === "object"){
+        const objectNodes = Object.entries(payload)
+            .filter(([, value]) => {
+                if(value == null || typeof value !== "object" || Array.isArray(value)){
+                    return false;
+                }
+
+                return value.longName != null
+                    || value.shortName != null
+                    || value.long_name != null
+                    || value.short_name != null
+                    || value.hwModel != null
+                    || value.hardwareModel != null
+                    || value.hardware_model != null
+                    || value.rawLongName != null
+                    || value.rawShortName != null
+                    || value.raw_long_name != null
+                    || value.raw_short_name != null;
+            })
+            .map(([nodeId, value]) => {
+                return {
+                    id: value.id ?? nodeId,
+                    node_id: value.node_id ?? value.nodeId ?? nodeId,
+                    ...value,
+                };
+            });
+
+        if(objectNodes.length > 0){
+            return objectNodes;
+        }
+    }
+
     return [];
 }
 
-function buildImportedNodeIdentity(sourceNode) {
+function buildImportedNodeIdentity(sourceNode, options = {}) {
+    const {
+        allowedFields = null,
+    } = options;
     const nodeId = getImportedNodeId(sourceNode);
     if(nodeId == null){
         return null;
     }
 
+    const allowedFieldsSet = allowedFields != null ? new Set(allowedFields) : null;
+    const shouldIncludeField = (fieldName) => allowedFieldsSet == null || allowedFieldsSet.has(fieldName);
     const data = {};
 
     const longName = getImportedLongName(sourceNode);
-    if(longName != null){
+    if(longName != null && shouldIncludeField("long_name")){
         data.long_name = longName;
     }
 
     const shortName = getImportedShortName(sourceNode, nodeId);
-    if(shortName != null){
+    if(shortName != null && shouldIncludeField("short_name")){
         data.short_name = shortName;
     }
 
-    const hardwareModel = hasKnownHardwareModel(sourceNode?.hardware_model) ? sourceNode.hardware_model : null;
-    if(hardwareModel != null){
+    const hardwareModelRawValue = sourceNode?.hardware_model ?? sourceNode?.hardwareModel ?? sourceNode?.hwModel;
+    const hardwareModel = getImportedHardwareModel(hardwareModelRawValue);
+    if(hardwareModel != null && shouldIncludeField("hardware_model")){
         data.hardware_model = hardwareModel;
     }
 
-    if(Number.isInteger(sourceNode?.role) && sourceNode.role >= 0){
-        data.role = sourceNode.role;
+    const role = Number.isInteger(sourceNode?.role) && sourceNode.role >= 0 ? sourceNode.role : null;
+    if(role != null && shouldIncludeField("role")){
+        data.role = role;
     }
 
-    const firmwareVersion = getMeaningfulString(sourceNode?.firmware_version);
-    if(firmwareVersion != null){
+    const firmwareVersion = getMeaningfulString(sourceNode?.firmware_version ?? sourceNode?.fwVersion);
+    if(firmwareVersion != null && shouldIncludeField("firmware_version")){
         data.firmware_version = firmwareVersion;
     }
 
@@ -157,6 +233,7 @@ async function importNodeIdentitiesFromJsonPayload(prisma, payload, sourceLabel,
     const {
         createMissingNodes = false,
         overwriteExisting = false,
+        allowedFields = null,
     } = options;
 
     const importedNodes = getImportedNodesFromPayload(payload);
@@ -187,7 +264,9 @@ async function importNodeIdentitiesFromJsonPayload(prisma, payload, sourceLabel,
     let skippedCount = 0;
 
     for(const sourceNode of importedNodes){
-        const importedIdentity = buildImportedNodeIdentity(sourceNode);
+        const importedIdentity = buildImportedNodeIdentity(sourceNode, {
+            allowedFields: allowedFields,
+        });
         if(importedIdentity == null || Object.keys(importedIdentity.data).length === 0){
             skippedCount += 1;
             continue;
@@ -302,6 +381,7 @@ async function importNodeIdentitiesFromUrl(prisma, url, options = {}) {
 }
 
 module.exports = {
+    getImportedHardwareModel,
     getMeaningfulLongName,
     getMeaningfulShortName,
     getMeaningfulString,
