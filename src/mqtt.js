@@ -68,6 +68,11 @@ const optionsList = [
         description: "How often to sync missing node identities from external JSON APIs.",
     },
     {
+        name: "mqtt-processing-concurrency",
+        type: Number,
+        description: "How many MQTT packets should be processed in parallel.",
+    },
+    {
         name: "allowed-portnums",
         type: Number,
         multiple: true,
@@ -248,6 +253,7 @@ const identitySourceUrls = [...new Set(options["identity-source-url"] ?? [
     "https://meshmap.ro/api/v1/nodes",
 ])];
 const identitySyncIntervalSeconds = options["identity-sync-interval-seconds"] ?? 21600;
+const mqttProcessingConcurrency = Math.max(1, options["mqtt-processing-concurrency"] ?? 16);
 const allowedPortnums = options["allowed-portnums"] ?? null;
 const logUnknownPortnums = options["log-unknown-portnums"] ?? false;
 const collectServiceEnvelopes = options["collect-service-envelopes"] ?? false;
@@ -286,7 +292,7 @@ const POWER_METRIC_WRITE_DEDUPE_WINDOW_MS = 15000;
 const NODE_POSITION_UPDATE_WINDOW_MS = 15000;
 const NODE_TELEMETRY_UPDATE_WINDOW_MS = 15000;
 const NODE_NEIGHBOURS_UPDATE_WINDOW_MS = 15000;
-const MQTT_MESSAGE_PROCESSING_CONCURRENCY = 8;
+const MQTT_MESSAGE_PROCESSING_CONCURRENCY = mqttProcessingConcurrency;
 const MQTT_MESSAGE_QUEUE_WARNING_THRESHOLD = 5000;
 
 const recentGatewayHeartbeatWrites = new Map();
