@@ -297,7 +297,10 @@ if(options.help){
 }
 
 // get options and fallback to default values
-const DEFAULT_IDENTITY_SOURCE_URL = "https://k8scccow040o4wsc44cggsc8.bolte.lol/nodes.json";
+const DEFAULT_IDENTITY_SOURCE_URLS = [
+    "https://k8scccow040o4wsc44cggsc8.bolte.lol/nodes.json",
+    "https://meshmap.net/nodes.json",
+];
 const protobufsPath = options["protobufs-path"] ?? path.join(path.dirname(__filename), "external/protobufs");
 const mqttBrokerUrl = options["mqtt-broker-url"] ?? "mqtt://mqtt.meshtastic.org";
 const mqttUsername = options["mqtt-username"] ?? "meshdev";
@@ -306,7 +309,7 @@ const mqttClientId = options["mqtt-client-id"] ?? `meshtastic-map-${crypto.rando
 const mqttTopics = options["mqtt-topic"] ?? getDefaultMqttTopics(mqttBrokerUrl);
 const identityNameFailsafeUrl = options["identity-name-failsafe-url"] ?? null;
 const identitySourceUrls = [...new Set(options["identity-source-url"] ?? [
-    DEFAULT_IDENTITY_SOURCE_URL,
+    ...DEFAULT_IDENTITY_SOURCE_URLS,
 ])];
 const identitySyncIntervalSeconds = options["identity-sync-interval-seconds"] ?? 21600;
 const hasIdentityFailsafeSource = Boolean(identityNameFailsafeUrl);
@@ -599,8 +602,11 @@ function scheduleMqttMessageProcessing() {
     }
 }
 
-function getPrimaryIdentitySourceUrl() {
-    return identitySourceUrls[0] ?? identityNameFailsafeUrl ?? null;
+function getTargetedIdentitySourceUrls() {
+    return [...new Set([
+        ...identitySourceUrls,
+        ...(hasSeparateIdentityFailsafeSource ? [identityNameFailsafeUrl] : []),
+    ])];
 }
 
 async function getTargetedIdentitySourceNodesById(options = {}) {
@@ -608,8 +614,8 @@ async function getTargetedIdentitySourceNodesById(options = {}) {
         forceRefresh = false,
     } = options;
 
-    const sourceUrl = getPrimaryIdentitySourceUrl();
-    if(sourceUrl == null){
+    const sourceUrls = getTargetedIdentitySourceUrls();
+    if(sourceUrls.length === 0){
         return null;
     }
 
@@ -625,23 +631,46 @@ async function getTargetedIdentitySourceNodesById(options = {}) {
 
     targetedIdentitySourceNodesByIdCachePromise = (async () => {
         try {
-            const payload = await fetchNodeIdentitiesPayloadFromUrl(sourceUrl, {
-                timeout_ms: 30000,
-            });
             const nodesById = new Map();
 
-            for(const sourceNode of getImportedNodesFromPayload(payload)){
+            for(const sourceUrl of sourceUrls){
                 try {
-                    const sourceNodeId = NodeIdUtil.convertToNumeric(
-                        sourceNode?.node_id
-                        ?? sourceNode?.nodeId
-                        ?? sourceNode?.node_id_hex
-                        ?? sourceNode?.nodeIdHex
-                        ?? sourceNode?.id
-                    );
-                    nodesById.set(sourceNodeId.toString(), sourceNode);
+                    const payload = await fetchNodeIdentitiesPayloadFromUrl(sourceUrl, {
+                        timeout_ms: 30000,
+                    });
+
+                    for(const sourceNode of getImportedNodesFromPayload(payload)){
+                        const importedIdentity = buildImportedNodeIdentity(sourceNode, {
+                            allowedFields: ["long_name", "short_name", "hardware_model"],
+                        });
+                        if(importedIdentity == null || Object.keys(importedIdentity.data).length === 0){
+                            continue;
+                        }
+
+                        const nodeIdKey = importedIdentity.node_id.toString();
+                        const existingIdentity = nodesById.get(nodeIdKey) ?? {
+                            node_id: importedIdentity.node_id,
+                            data: {},
+                            sources: [],
+                        };
+
+                        if(importedIdentity.data.long_name != null && existingIdentity.data.long_name == null){
+                            existingIdentity.data.long_name = importedIdentity.data.long_name;
+                        }
+
+                        if(importedIdentity.data.short_name != null && existingIdentity.data.short_name == null){
+                            existingIdentity.data.short_name = importedIdentity.data.short_name;
+                        }
+
+                        if(importedIdentity.data.hardware_model != null && existingIdentity.data.hardware_model == null){
+                            existingIdentity.data.hardware_model = importedIdentity.data.hardware_model;
+                        }
+
+                        existingIdentity.sources.push(sourceUrl);
+                        nodesById.set(nodeIdKey, existingIdentity);
+                    }
                 } catch(err) {
-                    // ignore malformed node ids in external snapshots
+                    console.warn(`Targeted identity source fetch failed for ${sourceUrl}: ${err.message}`);
                 }
             }
 
@@ -650,7 +679,7 @@ async function getTargetedIdentitySourceNodesById(options = {}) {
             return nodesById;
         } catch(err) {
             if(targetedIdentitySourceNodesByIdCache != null){
-                console.warn(`Falling back to stale targeted identity cache for ${sourceUrl}: ${err.message}`);
+                console.warn(`Falling back to stale targeted identity cache: ${err.message}`);
                 return targetedIdentitySourceNodesByIdCache;
             }
 
@@ -678,8 +707,8 @@ async function hydrateNodeIdentityFromPrimarySource(nodeId, reason, options = {}
         forceRefresh = false,
     } = options;
 
-    const sourceUrl = getPrimaryIdentitySourceUrl();
-    if(nodeId == null || sourceUrl == null){
+    const sourceUrls = getTargetedIdentitySourceUrls();
+    if(nodeId == null || sourceUrls.length === 0){
         return false;
     }
 
@@ -705,21 +734,19 @@ async function hydrateNodeIdentityFromPrimarySource(nodeId, reason, options = {}
     }
 
     let nodesById = await getTargetedIdentitySourceNodesById();
-    let sourceNode = nodesById?.get(nodeIdKey) ?? null;
-    if(sourceNode == null && !forceRefresh){
+    let mergedIdentity = nodesById?.get(nodeIdKey) ?? null;
+    if(mergedIdentity == null && !forceRefresh){
         nodesById = await getTargetedIdentitySourceNodesById({
             forceRefresh: true,
         });
-        sourceNode = nodesById?.get(nodeIdKey) ?? null;
+        mergedIdentity = nodesById?.get(nodeIdKey) ?? null;
     }
 
-    if(sourceNode == null){
+    if(mergedIdentity == null){
         return false;
     }
 
-    const importedIdentity = buildImportedNodeIdentity(sourceNode, {
-        allowedFields: ["long_name", "short_name", "hardware_model"],
-    });
+    const importedIdentity = mergedIdentity;
     if(importedIdentity == null || Object.keys(importedIdentity.data).length === 0){
         return false;
     }
@@ -751,8 +778,8 @@ async function hydrateNodeIdentityFromPrimarySource(nodeId, reason, options = {}
         data: data,
     });
 
-    console.log("Hydrated node identity from primary source", {
-        source: sourceUrl,
+    console.log("Hydrated node identity from targeted sources", {
+        sources: importedIdentity.sources,
         node_id: nodeIdKey,
         reason: reason,
         fields: Object.keys(data),
