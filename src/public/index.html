@@ -294,7 +294,7 @@
 
                 <!-- search bar -->
                 <div class="mx-3 flex-1 relative" :class="{ 'hidden lg:block': !isShowingMobileSearch }">
-                    <input v-model="searchText" type="text" class="search-input text-sm block" :placeholder="`Search ${nodes.length} nodes...`">
+                    <input v-model="searchText" type="text" class="search-input text-sm block" :placeholder="`Search ${mappableNodesCount} mappable / ${nodes.length} total nodes...`">
                     <div v-if="searchText !== ''" class="absolute z-search bg-white w-full border border-gray-200 rounded-lg shadow-md mt-1 overflow-y-scroll max-h-80 divide-y divide-gray-200">
 
                         <template v-if="searchedNodes.length > 0">
@@ -2706,8 +2706,24 @@
                 return brightness > 0.5 ? "#000000" : "#FFFFFF";
 
             },
+            hasNodeValidPosition(node) {
+                if(!node){
+                    return false;
+                }
+
+                if(node.latitude == null || node.longitude == null){
+                    return false;
+                }
+
+                const latitude = Number(node.latitude) / 10000000;
+                const longitude = Number(node.longitude) / 10000000;
+                return !isNaN(latitude) && !isNaN(longitude);
+            },
         },
         computed: {
+            mappableNodesCount() {
+                return this.nodes.filter((node) => this.hasNodeValidPosition(node)).length;
+            },
             searchedNodes() {
 
                 // search nodes
@@ -3050,7 +3066,6 @@
         // find node
         var node = findNodeById(id);
         if(!node){
-            alert("Could not find node: " + id);
             return false;
         }
 
@@ -3510,7 +3525,7 @@
             nodesById[node.node_id.toString()] = node;
 
             // skip nodes without position
-            if(!node.latitude || !node.longitude){
+            if(node.latitude == null || node.longitude == null){
                 continue;
             }
 
