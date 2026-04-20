@@ -1898,9 +1898,6 @@
 
                 moment: window.moment,
 
-                nodesAutoRefreshIntervalId: null,
-                isNodesAutoRefreshInFlight: false,
-
             };
         },
         mounted: function() {
@@ -1943,17 +1940,6 @@
                 this.nodes = nodes;
             };
 
-            // periodically refresh node snapshot so search results reflect new MQTT traffic
-            this.nodesAutoRefreshIntervalId = window.setInterval(() => {
-                this.refreshNodesSnapshot();
-            }, 10000);
-
-        },
-        beforeUnmount: function() {
-            if(this.nodesAutoRefreshIntervalId != null){
-                window.clearInterval(this.nodesAutoRefreshIntervalId);
-                this.nodesAutoRefreshIntervalId = null;
-            }
         },
         methods: {
             getAnnouncementId: function() {
@@ -1977,20 +1963,6 @@
                     this.hardwareModelStats = response.data.hardware_model_stats;
                 }).catch((error) => {
                     // do nothing
-                });
-            },
-            refreshNodesSnapshot: function() {
-                if(this.isNodesAutoRefreshInFlight){
-                    return;
-                }
-
-                this.isNodesAutoRefreshInFlight = true;
-                window.axios.get('/api/v1/nodes').then((response) => {
-                    onNodesUpdated(response.data.nodes ?? []);
-                }).catch(() => {
-                    // do nothing
-                }).finally(() => {
-                    this.isNodesAutoRefreshInFlight = false;
                 });
             },
             loadNodeDetails: function(nodeId) {
@@ -3529,6 +3501,15 @@
     }
 
     function onNodesUpdated(updatedNodes) {
+        const dedupedNodesById = {};
+        for(const updatedNode of updatedNodes ?? []){
+            if(updatedNode?.node_id == null){
+                continue;
+            }
+
+            dedupedNodesById[updatedNode.node_id.toString()] = updatedNode;
+        }
+        const uniqueUpdatedNodes = Object.values(dedupedNodesById);
 
         // clear nodes cache
         nodes = [];
@@ -3541,7 +3522,7 @@
         const configNeighboursMaxDistanceInMeters = getConfigNeighboursMaxDistanceInMeters();
 
         // add nodes
-        for(const node of updatedNodes){
+        for(const node of uniqueUpdatedNodes){
 
             // skip nodes older than configured node max age
             if(configNodesMaxAgeInSeconds){
@@ -3651,7 +3632,7 @@
 
         }
 
-        for(const node of updatedNodes){
+        for(const node of uniqueUpdatedNodes){
 
             // find current node
             const currentNode = findNodeMarkerById(node.node_id);
