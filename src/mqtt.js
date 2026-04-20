@@ -6,6 +6,7 @@ const protobufjs = require("protobufjs");
 const commandLineArgs = require("command-line-args");
 const commandLineUsage = require("command-line-usage");
 const PositionUtil = require("./utils/position_util");
+const NodeIdUtil = require("./utils/node_id_util");
 const { importNodeIdentitiesFromUrl } = require("./utils/node_identity_import");
 
 // create prisma db client
@@ -66,6 +67,13 @@ const optionsList = [
         name: "identity-sync-interval-seconds",
         type: Number,
         description: "How often to sync missing node identities from external JSON APIs.",
+    },
+    {
+        name: "allowed-node-ids",
+        type: String,
+        multiple: true,
+        typeLabel: '<nodeId> ...',
+        description: "If provided, only packets from these node ids will be processed. Supports decimal ids and hex ids like !AABBCCDD.",
     },
     {
         name: "mqtt-processing-concurrency",
@@ -223,6 +231,27 @@ function getDefaultMqttTopics(mqttBrokerUrl) {
     return ["msh/#"];
 }
 
+function parseNodeIdFilters(nodeIds) {
+    if(nodeIds == null){
+        return null;
+    }
+
+    const parsedNodeIds = new Set();
+    for(const nodeId of nodeIds){
+        try {
+            parsedNodeIds.add(NodeIdUtil.convertToNumeric(nodeId).toString());
+        } catch(err) {
+            console.warn(`Ignoring invalid allowed node id filter: ${nodeId}`);
+        }
+    }
+
+    if(parsedNodeIds.size === 0){
+        return null;
+    }
+
+    return parsedNodeIds;
+}
+
 // parse command line args
 const options = commandLineArgs(optionsList);
 
@@ -253,6 +282,7 @@ const identitySourceUrls = [...new Set(options["identity-source-url"] ?? [
     "https://meshmap.ro/api/v1/nodes",
 ])];
 const identitySyncIntervalSeconds = options["identity-sync-interval-seconds"] ?? 21600;
+const allowedNodeIds = parseNodeIdFilters(options["allowed-node-ids"] ?? null);
 const mqttProcessingConcurrency = Math.max(1, options["mqtt-processing-concurrency"] ?? 16);
 const allowedPortnums = options["allowed-portnums"] ?? null;
 const logUnknownPortnums = options["log-unknown-portnums"] ?? false;
@@ -489,6 +519,18 @@ function shouldProcessMqttTopic(topic) {
     return MQTT_PACKET_TOPIC_REGEX.test(topic);
 }
 
+function shouldAcceptSender(nodeId) {
+    if(nodeId == null || nodeId === 0){
+        return false;
+    }
+
+    if(allowedNodeIds == null){
+        return true;
+    }
+
+    return allowedNodeIds.has(nodeId.toString());
+}
+
 function scheduleMqttMessageProcessing() {
     while(activeMqttMessageProcessors < MQTT_MESSAGE_PROCESSING_CONCURRENCY && mqttMessageQueue.length > 0){
         const queuedMessage = mqttMessageQueue.shift();
@@ -600,6 +642,7 @@ console.log("Starting MQTT collector", {
     mqtt_topics: mqttTopics,
     identity_source_urls: identitySourceUrls,
     identity_sync_interval_seconds: identitySyncIntervalSeconds,
+    allowed_node_ids_count: allowedNodeIds?.size ?? 0,
     protobufs_path: protobufsPath,
 });
 
@@ -1088,26 +1131,44 @@ async function processMqttMessage(topic, message) {
             return;
         }
 
+        const packet = envelope.packet;
+
+        // ignore anonymous packets
+        if(packet.from == null || packet.from === 0){
+            return;
+        }
+
+        // ignore PKI direct messages that we can not decrypt or attribute reliably
+        if(packet.pkiEncrypted === true){
+            return;
+        }
+
+        // reference Go collector supports sender filtering via Accept(); apply the
+        // same idea here as early as possible to avoid unnecessary decode/db work.
+        if(!shouldAcceptSender(packet.from)){
+            return;
+        }
+
         // attempt to decrypt encrypted packets
-        const isEncrypted = envelope.packet.encrypted?.length > 0;
+        const isEncrypted = packet.encrypted?.length > 0;
         if(isEncrypted){
-            const decoded = decrypt(envelope.packet);
+            const decoded = decrypt(packet);
             if(decoded){
-                envelope.packet.decoded = decoded;
+                packet.decoded = decoded;
             }
         }
 
         // get portnum from decoded packet
-        const portnum = envelope.packet?.decoded?.portnum;
+        const portnum = packet?.decoded?.portnum;
 
         // get bitfield from decoded packet
         // bitfield was added in v2.5 of meshtastic firmware
         // this value will be null for packets from v2.4.x and below, and will be an integer in v2.5.x and above
-        const bitfield = envelope.packet?.decoded?.bitfield;
+        const bitfield = packet?.decoded?.bitfield;
         const gatewayNodeId = envelope.gatewayId ? convertHexIdToNumericId(envelope.gatewayId) : null;
 
         // check if we can see the decrypted packet data
-        if(envelope.packet.decoded != null){
+        if(packet.decoded != null){
 
             // check if bitfield is available (v2.5.x firmware or newer)
             if(bitfield != null){
@@ -1141,14 +1202,14 @@ async function processMqttMessage(topic, message) {
                         mqtt_topic: topic,
                         channel_id: envelope.channelId,
                         gateway_id: gatewayNodeId,
-                        to: envelope.packet.to,
-                        from: envelope.packet.from,
+                        to: packet.to,
+                        from: packet.from,
                         protobuf: message,
                     },
                 });
             } catch (e) {
                 console.error(e, {
-                    envelope: envelope.packet,
+                    envelope: packet,
                 });
             }
         }
