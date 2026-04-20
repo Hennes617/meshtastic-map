@@ -8,6 +8,8 @@ const commandLineUsage = require("command-line-usage");
 const { PrismaClient } = require("@prisma/client");
 const NodeIdUtil = require("./utils/node_id_util");
 const {
+    getMeaningfulLongName,
+    getMeaningfulShortName,
     getMeaningfulString,
     hasKnownHardwareModel,
     importNodeIdentitiesFromFile,
@@ -158,14 +160,14 @@ async function repairNodeIdentitiesFromMapReports() {
         },
     });
 
-    const nodesMissingLongNameCount = nodes.filter((node) => getMeaningfulString(node.long_name) == null).length;
-    const nodesMissingShortNameCount = nodes.filter((node) => getMeaningfulString(node.short_name) == null).length;
+    const nodesMissingLongNameCount = nodes.filter((node) => getMeaningfulLongName(node.long_name) == null).length;
+    const nodesMissingShortNameCount = nodes.filter((node) => getMeaningfulShortName(node.short_name, node.node_id) == null).length;
     const nodesMissingHardwareModelCount = nodes.filter((node) => !hasKnownHardwareModel(node.hardware_model)).length;
 
     const nodeIdsToRepair = nodes
         .filter((node) => {
-            return getMeaningfulString(node.long_name) == null
-                || getMeaningfulString(node.short_name) == null
+            return getMeaningfulLongName(node.long_name) == null
+                || getMeaningfulShortName(node.short_name, node.node_id) == null
                 || !hasKnownHardwareModel(node.hardware_model);
         })
         .map((node) => node.node_id);
@@ -221,14 +223,14 @@ async function repairNodeIdentitiesFromMapReports() {
         const fallback = fallbackByNodeId.get(nodeIdKey) ?? {};
 
         if(fallback.long_name == null){
-            const longName = getMeaningfulString(mapReport.long_name);
+            const longName = getMeaningfulLongName(mapReport.long_name);
             if(longName != null){
                 fallback.long_name = longName;
             }
         }
 
         if(fallback.short_name == null){
-            const shortName = getMeaningfulString(mapReport.short_name);
+            const shortName = getMeaningfulShortName(mapReport.short_name, mapReport.node_id);
             if(shortName != null){
                 fallback.short_name = shortName;
             }
@@ -264,11 +266,11 @@ async function repairNodeIdentitiesFromMapReports() {
 
         const data = {};
 
-        if(getMeaningfulString(node.long_name) == null && fallback.long_name != null){
+        if(getMeaningfulLongName(node.long_name) == null && fallback.long_name != null){
             data.long_name = fallback.long_name;
         }
 
-        if(getMeaningfulString(node.short_name) == null && fallback.short_name != null){
+        if(getMeaningfulShortName(node.short_name, node.node_id) == null && fallback.short_name != null){
             data.short_name = fallback.short_name;
         }
 

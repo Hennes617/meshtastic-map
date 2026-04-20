@@ -7,7 +7,11 @@ const commandLineArgs = require("command-line-args");
 const commandLineUsage = require("command-line-usage");
 const PositionUtil = require("./utils/position_util");
 const NodeIdUtil = require("./utils/node_id_util");
-const { importNodeIdentitiesFromUrl } = require("./utils/node_identity_import");
+const {
+    getMeaningfulLongName,
+    getMeaningfulShortName,
+    importNodeIdentitiesFromUrl,
+} = require("./utils/node_identity_import");
 
 // create prisma db client
 const { PrismaClient } = require("@prisma/client");
@@ -222,10 +226,20 @@ function getDefaultMqttTopics(mqttBrokerUrl) {
     const broker = (mqttBrokerUrl ?? "").toLowerCase();
 
     // The public Meshtastic broker currently emits packet traffic on regional topic roots
-    // like msh/US/2/e/... and msh/EU_868/2/e/..., while subscribing to msh/# does not
-    // reliably yield traffic for collectors.
+    // with varying path depth, and map reports on sibling `/map/` topics.
+    // The reference Go collector subscribes to both encrypted packet topics and map topics
+    // for 1-4 path segments before `/2/...`; mirror that here.
     if(broker.includes("mqtt.meshtastic.org")){
-        return ["msh/+/2/e/#"];
+        return [
+            "msh/+/2/map/",
+            "msh/+/2/e/+/+",
+            "msh/+/+/2/map/",
+            "msh/+/+/2/e/+/+",
+            "msh/+/+/+/2/map/",
+            "msh/+/+/+/2/e/+/+",
+            "msh/+/+/+/+/2/map/",
+            "msh/+/+/+/+/2/e/+/+",
+        ];
     }
 
     return ["msh/#"];
@@ -279,6 +293,7 @@ const mqttPassword = options["mqtt-password"] ?? "large4cats";
 const mqttClientId = options["mqtt-client-id"] ?? `meshtastic-map-${crypto.randomBytes(4).toString("hex")}`;
 const mqttTopics = options["mqtt-topic"] ?? getDefaultMqttTopics(mqttBrokerUrl);
 const identitySourceUrls = [...new Set(options["identity-source-url"] ?? [
+    "https://meshtastic.pugetmesh.org/api/v1/nodes",
     "https://meshmap.ro/api/v1/nodes",
 ])];
 const identitySyncIntervalSeconds = options["identity-sync-interval-seconds"] ?? 21600;
@@ -325,7 +340,7 @@ const NODE_NEIGHBOURS_UPDATE_WINDOW_MS = 15000;
 const MQTT_MESSAGE_DEDUPE_WINDOW_MS = 30000;
 const MQTT_MESSAGE_PROCESSING_CONCURRENCY = mqttProcessingConcurrency;
 const MQTT_MESSAGE_QUEUE_WARNING_THRESHOLD = 5000;
-const MQTT_PACKET_TOPIC_REGEX = /^msh(?:\/[^/]+)+\/2\/e\/[^/]+\/![0-9a-f]+$/i;
+const MQTT_PACKET_TOPIC_REGEX = /^msh(?:\/[^/]+)+\/2\/(?:e\/[^/]+\/![0-9a-f]+|map\/)$/i;
 
 const recentGatewayHeartbeatWrites = new Map();
 const recentPositionWrites = new Map();
@@ -381,15 +396,15 @@ async function updateNodeFields(nodeId, data) {
     });
 }
 
-function buildUserNodeData(user) {
+function buildUserNodeData(user, nodeId) {
     const data = {};
 
-    const longName = getMeaningfulString(user.longName);
+    const longName = getMeaningfulLongName(user.longName);
     if(longName != null){
         data.long_name = longName;
     }
 
-    const shortName = getMeaningfulString(user.shortName);
+    const shortName = getMeaningfulShortName(user.shortName, nodeId);
     if(shortName != null){
         data.short_name = shortName;
     }
@@ -410,15 +425,15 @@ function buildUserNodeData(user) {
     return data;
 }
 
-function buildMapReportNodeData(mapReport) {
+function buildMapReportNodeData(mapReport, nodeId) {
     const data = {};
 
-    const longName = getMeaningfulString(mapReport.longName);
+    const longName = getMeaningfulLongName(mapReport.longName);
     if(longName != null){
         data.long_name = longName;
     }
 
-    const shortName = getMeaningfulString(mapReport.shortName);
+    const shortName = getMeaningfulShortName(mapReport.shortName, nodeId);
     if(shortName != null){
         data.short_name = shortName;
     }
@@ -514,8 +529,10 @@ function purgeRecentWriteCaches() {
 }
 
 function shouldProcessMqttTopic(topic) {
-    // Keep only packet uplink topics that match Meshtastic envelope topics.
-    // Example: msh/US/2/e/LongFast/!1234abcd
+    // Keep only Meshtastic MQTT uplink topics for encrypted packet traffic and map reports.
+    // Examples:
+    // - msh/EU_868/2/e/LongFast/!1234abcd
+    // - msh/US/CA/BayArea/2/map/
     return MQTT_PACKET_TOPIC_REGEX.test(topic);
 }
 
@@ -1381,7 +1398,7 @@ async function processMqttMessage(topic, message) {
 
             // create or update node in db
             try {
-                await updateNodeFields(envelope.packet.from, buildUserNodeData(user));
+                await updateNodeFields(envelope.packet.from, buildUserNodeData(user, envelope.packet.from));
             } catch (e) {
                 console.error(e);
             }
@@ -1696,7 +1713,7 @@ async function processMqttMessage(topic, message) {
 
             // create or update node in db
             try {
-                await updateNodeFields(envelope.packet.from, buildMapReportNodeData(mapReport));
+                await updateNodeFields(envelope.packet.from, buildMapReportNodeData(mapReport, envelope.packet.from));
             } catch (e) {
                 console.error(e);
             }

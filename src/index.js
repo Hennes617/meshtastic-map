@@ -87,6 +87,19 @@ const mapNodeSelect = {
     updated_at: true,
 };
 
+const searchNodeSelect = {
+    node_id: true,
+    long_name: true,
+    short_name: true,
+    hardware_model: true,
+    role: true,
+    latitude: true,
+    longitude: true,
+    mqtt_connection_state_updated_at: true,
+    created_at: true,
+    updated_at: true,
+};
+
 const textMessageNodeSelect = {
     node_id: true,
     long_name: true,
@@ -185,6 +198,22 @@ function parseNodeIds(idsValue) {
     return [...new Set(parsedIds)];
 }
 
+function parseBooleanQueryParam(value) {
+    if(value == null){
+        return false;
+    }
+
+    switch(value.toString().trim().toLowerCase()){
+        case "1":
+        case "true":
+        case "yes":
+        case "on":
+            return true;
+        default:
+            return false;
+    }
+}
+
 const app = express();
 
 // enable compression
@@ -210,6 +239,8 @@ app.get('/api', async (req, res) => {
             "params": {
                 "role": "Filter by role",
                 "hardware_model": "Filter by hardware model",
+                "view": "Response shape: map or search",
+                "mappable_only": "Only include nodes with both latitude and longitude",
             },
         },
         {
@@ -317,14 +348,20 @@ app.get('/api/v1/nodes', async (req, res) => {
         // get query params
         const role = req.query.role ? parseInt(req.query.role) : undefined;
         const hardwareModel = req.query.hardware_model ? parseInt(req.query.hardware_model) : undefined;
+        const view = req.query.view === "search" ? "search" : "map";
+        const mappableOnly = parseBooleanQueryParam(req.query.mappable_only);
+
+        const where = {
+            role: role,
+            hardware_model: hardwareModel,
+            latitude: mappableOnly ? { not: null } : undefined,
+            longitude: mappableOnly ? { not: null } : undefined,
+        };
 
         // get nodes from db
         const nodes = await prisma.node.findMany({
-            select: mapNodeSelect,
-            where: {
-                role: role,
-                hardware_model: hardwareModel,
-            },
+            select: view === "search" ? searchNodeSelect : mapNodeSelect,
+            where: where,
         });
 
         const nodesWithInfo = [];

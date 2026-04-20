@@ -14,11 +14,7 @@ function getMeaningfulString(value) {
     return normalizedValue;
 }
 
-function hasKnownHardwareModel(value) {
-    return Number.isInteger(value) && value > 0;
-}
-
-function isMeaningfulImportedLongName(value) {
+function getMeaningfulLongName(value) {
     const longName = getMeaningfulString(value);
     if(longName == null){
         return null;
@@ -29,6 +25,14 @@ function isMeaningfulImportedLongName(value) {
     }
 
     return longName;
+}
+
+function hasKnownHardwareModel(value) {
+    return Number.isInteger(value) && value > 0;
+}
+
+function isMeaningfulImportedLongName(value) {
+    return getMeaningfulLongName(value);
 }
 
 function getImportedNodeId(sourceNode) {
@@ -56,19 +60,21 @@ function getImportedNodeId(sourceNode) {
 }
 
 function getImportedShortName(sourceNode, nodeId) {
-    const rawShortName = getMeaningfulString(sourceNode?.raw_short_name);
-    if(rawShortName != null){
-        return rawShortName;
-    }
+    return getMeaningfulShortName(
+        sourceNode?.raw_short_name ?? sourceNode?.short_name,
+        nodeId,
+    );
+}
 
-    const shortName = getMeaningfulString(sourceNode?.short_name);
+function getMeaningfulShortName(value, nodeId) {
+    const shortName = getMeaningfulString(value);
     if(shortName == null){
         return null;
     }
 
     if(nodeId != null){
         const nodeIdSuffix = nodeId.toString(16).toUpperCase().slice(-4);
-        if(shortName === nodeIdSuffix){
+        if(shortName.toUpperCase() === nodeIdSuffix){
             return null;
         }
     }
@@ -77,12 +83,20 @@ function getImportedShortName(sourceNode, nodeId) {
 }
 
 function getImportedLongName(sourceNode) {
-    const rawLongName = getMeaningfulString(sourceNode?.raw_long_name);
+    const rawLongName = getMeaningfulLongName(sourceNode?.raw_long_name);
     if(rawLongName != null){
         return rawLongName;
     }
 
     return isMeaningfulImportedLongName(sourceNode?.long_name);
+}
+
+function getExistingLongName(value) {
+    return getMeaningfulLongName(value);
+}
+
+function getExistingShortName(value, nodeId) {
+    return getMeaningfulShortName(value, nodeId);
 }
 
 function getImportedNodesFromPayload(payload) {
@@ -204,12 +218,12 @@ async function importNodeIdentitiesFromJsonPayload(prisma, payload, sourceLabel,
         const data = {};
 
         if(importedIdentity.data.long_name != null
-            && (overwriteExisting || getMeaningfulString(existingNode.long_name) == null)){
+            && (overwriteExisting || getExistingLongName(existingNode.long_name) == null)){
             data.long_name = importedIdentity.data.long_name;
         }
 
         if(importedIdentity.data.short_name != null
-            && (overwriteExisting || getMeaningfulString(existingNode.short_name) == null)){
+            && (overwriteExisting || getExistingShortName(existingNode.short_name, importedIdentity.node_id) == null)){
             data.short_name = importedIdentity.data.short_name;
         }
 
@@ -256,11 +270,28 @@ async function importNodeIdentitiesFromFile(prisma, filePath, options = {}) {
 }
 
 async function importNodeIdentitiesFromUrl(prisma, url, options = {}) {
-    const response = await fetch(url, {
-        headers: {
-            "accept": "application/json",
-        },
-    });
+    const timeoutMs = options.timeout_ms ?? 15000;
+    const abortController = new AbortController();
+    const timeout = setTimeout(() => {
+        abortController.abort();
+    }, timeoutMs);
+    let response;
+    try {
+        response = await fetch(url, {
+            headers: {
+                "accept": "application/json",
+            },
+            signal: abortController.signal,
+        });
+    } catch(err) {
+        if(err?.name === "AbortError"){
+            throw new Error(`Request timed out after ${timeoutMs}ms`);
+        }
+
+        throw err;
+    } finally {
+        clearTimeout(timeout);
+    }
 
     if(!response.ok){
         throw new Error(`Request failed with status ${response.status} ${response.statusText}`);
@@ -271,6 +302,8 @@ async function importNodeIdentitiesFromUrl(prisma, url, options = {}) {
 }
 
 module.exports = {
+    getMeaningfulLongName,
+    getMeaningfulShortName,
     getMeaningfulString,
     hasKnownHardwareModel,
     importNodeIdentitiesFromFile,

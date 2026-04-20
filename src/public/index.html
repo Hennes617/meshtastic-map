@@ -830,7 +830,7 @@
                                     <li class="flex p-3">
                                         <div class="text-sm font-medium text-gray-900">Lat/Long</div>
                                         <div class="ml-auto text-sm text-gray-700">
-                                            <span v-if="selectedNode.latitude && selectedNode.longitude">{{ selectedNode.latitude }}, {{ selectedNode.longitude }}</span>
+                                            <span v-if="selectedNode.latitude != null && selectedNode.longitude != null">{{ selectedNode.latitude }}, {{ selectedNode.longitude }}</span>
                                             <span v-else>???</span>
                                         </div>
                                     </li>
@@ -839,7 +839,7 @@
                                     <li class="flex p-3">
                                         <div class="text-sm font-medium text-gray-900">Altitude</div>
                                         <div class="ml-auto text-sm text-gray-700">
-                                            <span v-if="selectedNode.altitude">{{ selectedNode.altitude }}m</span>
+                                            <span v-if="selectedNode.altitude != null">{{ selectedNode.altitude }}m</span>
                                             <span v-else>???</span>
                                         </div>
                                     </li>
@@ -890,7 +890,7 @@
                                     <li class="flex p-3">
                                         <div class="text-sm font-medium text-gray-900">Battery Level</div>
                                         <div class="ml-auto text-sm text-gray-700">
-                                            <span v-if="selectedNode.battery_level">
+                                            <span v-if="selectedNode.battery_level != null">
                                                 <span v-if="selectedNode.battery_level > 100">Plugged In</span>
                                                 <span v-else>{{ selectedNode.battery_level }}%</span>
                                             </span>
@@ -902,7 +902,7 @@
                                     <li class="flex p-3">
                                         <div class="text-sm font-medium text-gray-900">Voltage</div>
                                         <div class="ml-auto text-sm text-gray-700">
-                                            <span v-if="selectedNode.voltage">{{ Number(selectedNode.voltage).toFixed(2) }}V</span>
+                                            <span v-if="selectedNode.voltage != null">{{ Number(selectedNode.voltage).toFixed(2) }}V</span>
                                             <span v-else>???</span>
                                         </div>
                                     </li>
@@ -911,7 +911,7 @@
                                     <li class="flex p-3">
                                         <div class="text-sm font-medium text-gray-900">Channel Utilization</div>
                                         <div class="ml-auto text-sm text-gray-700">
-                                            <span v-if="selectedNode.channel_utilization">{{ Number(selectedNode.channel_utilization).toFixed(2) }}%</span>
+                                            <span v-if="selectedNode.channel_utilization != null">{{ Number(selectedNode.channel_utilization).toFixed(2) }}%</span>
                                             <span v-else>???</span>
                                         </div>
                                     </li>
@@ -920,7 +920,7 @@
                                     <li class="flex p-3">
                                         <div class="text-sm font-medium text-gray-900">Air Util Tx</div>
                                         <div class="ml-auto text-sm text-gray-700">
-                                            <span v-if="selectedNode.air_util_tx">{{ Number(selectedNode.air_util_tx).toFixed(2) }}%</span>
+                                            <span v-if="selectedNode.air_util_tx != null">{{ Number(selectedNode.air_util_tx).toFixed(2) }}%</span>
                                             <span v-else>???</span>
                                         </div>
                                     </li>
@@ -929,7 +929,7 @@
                                     <li class="flex p-3">
                                         <div class="text-sm font-medium text-gray-900">Uptime</div>
                                         <div class="ml-auto text-sm text-gray-700">
-                                            <span v-if="selectedNode.uptime_seconds">{{ formatUptimeSeconds(selectedNode.uptime_seconds) }}</span>
+                                            <span v-if="selectedNode.uptime_seconds != null">{{ formatUptimeSeconds(selectedNode.uptime_seconds) }}</span>
                                             <span v-else>???</span>
                                         </div>
                                     </li>
@@ -980,7 +980,7 @@
                                     <li class="flex p-3">
                                         <div class="text-sm font-medium text-gray-900">Temperature</div>
                                         <div class="ml-auto text-sm text-gray-700">
-                                            <span v-if="selectedNode.temperature">{{ formatTemperature(selectedNode.temperature) }}</span>
+                                            <span v-if="selectedNode.temperature != null">{{ formatTemperature(selectedNode.temperature) }}</span>
                                             <span v-else>???</span>
                                         </div>
                                     </li>
@@ -989,7 +989,7 @@
                                     <li class="flex p-3">
                                         <div class="text-sm font-medium text-gray-900">Relative Humidity</div>
                                         <div class="ml-auto text-sm text-gray-700">
-                                            <span v-if="selectedNode.relative_humidity">{{ Number(selectedNode.relative_humidity).toFixed(0) }}%</span>
+                                            <span v-if="selectedNode.relative_humidity != null">{{ Number(selectedNode.relative_humidity).toFixed(0) }}%</span>
                                             <span v-else>???</span>
                                         </div>
                                     </li>
@@ -998,7 +998,7 @@
                                     <li class="flex p-3">
                                         <div class="text-sm font-medium text-gray-900">Barometric Pressure</div>
                                         <div class="ml-auto text-sm text-gray-700">
-                                            <span v-if="selectedNode.barometric_pressure">{{ Number(selectedNode.barometric_pressure).toFixed(1) }}hPa</span>
+                                            <span v-if="selectedNode.barometric_pressure != null">{{ Number(selectedNode.barometric_pressure).toFixed(1) }}hPa</span>
                                             <span v-else>???</span>
                                         </div>
                                     </li>
@@ -1050,9 +1050,9 @@
                                         <div class="text-sm font-medium text-gray-900">Channel 1</div>
                                         <div class="ml-auto text-sm text-gray-700">
                                             <span v-if="selectedNodeLatestPowerMetric">
-                                                <span v-if="selectedNodeLatestPowerMetric?.ch1_voltage">{{ Number(selectedNodeLatestPowerMetric.ch1_voltage).toFixed(2) }}V</span>
-                                                <span v-else>???</span>
-                                                <span v-if="selectedNodeLatestPowerMetric?.ch1_current"> / {{ Number(selectedNodeLatestPowerMetric.ch1_current).toFixed(2) }}mA</span>
+                                            <span v-if="selectedNodeLatestPowerMetric?.ch1_voltage != null">{{ Number(selectedNodeLatestPowerMetric.ch1_voltage).toFixed(2) }}V</span>
+                                            <span v-else>???</span>
+                                                <span v-if="selectedNodeLatestPowerMetric?.ch1_current != null"> / {{ Number(selectedNodeLatestPowerMetric.ch1_current).toFixed(2) }}mA</span>
                                             </span>
                                             <span v-else>???</span>
                                         </div>
@@ -1063,9 +1063,9 @@
                                         <div class="text-sm font-medium text-gray-900">Channel 2</div>
                                         <div class="ml-auto text-sm text-gray-700">
                                             <span v-if="selectedNodeLatestPowerMetric">
-                                                <span v-if="selectedNodeLatestPowerMetric?.ch2_voltage">{{ Number(selectedNodeLatestPowerMetric.ch2_voltage).toFixed(2) }}V</span>
-                                                <span v-else>???</span>
-                                                <span v-if="selectedNodeLatestPowerMetric?.ch2_current"> / {{ Number(selectedNodeLatestPowerMetric.ch2_current).toFixed(2) }}mA</span>
+                                            <span v-if="selectedNodeLatestPowerMetric?.ch2_voltage != null">{{ Number(selectedNodeLatestPowerMetric.ch2_voltage).toFixed(2) }}V</span>
+                                            <span v-else>???</span>
+                                                <span v-if="selectedNodeLatestPowerMetric?.ch2_current != null"> / {{ Number(selectedNodeLatestPowerMetric.ch2_current).toFixed(2) }}mA</span>
                                             </span>
                                             <span v-else>???</span>
                                         </div>
@@ -1076,9 +1076,9 @@
                                         <div class="text-sm font-medium text-gray-900">Channel 3</div>
                                         <div class="ml-auto text-sm text-gray-700">
                                             <span v-if="selectedNodeLatestPowerMetric">
-                                                <span v-if="selectedNodeLatestPowerMetric?.ch3_voltage">{{ Number(selectedNodeLatestPowerMetric.ch3_voltage).toFixed(2) }}V</span>
-                                                <span v-else>???</span>
-                                                <span v-if="selectedNodeLatestPowerMetric?.ch3_current"> / {{ Number(selectedNodeLatestPowerMetric.ch3_current).toFixed(2) }}mA</span>
+                                            <span v-if="selectedNodeLatestPowerMetric?.ch3_voltage != null">{{ Number(selectedNodeLatestPowerMetric.ch3_voltage).toFixed(2) }}V</span>
+                                            <span v-else>???</span>
+                                                <span v-if="selectedNodeLatestPowerMetric?.ch3_current != null"> / {{ Number(selectedNodeLatestPowerMetric.ch3_current).toFixed(2) }}mA</span>
                                             </span>
                                             <span v-else>???</span>
                                         </div>
@@ -1878,6 +1878,7 @@
                 selectedNodePowerMetrics: [],
                 selectedNodeMqttMetrics: [],
                 selectedNodeTraceroutes: [],
+                selectedNodeRefreshTimer: null,
 
                 deviceMetricsTimeRange: "3d",
                 environmentMetricsTimeRange: "3d",
@@ -1914,13 +1915,7 @@
             // handle node callback from outside of vue
             window._onNodeClick = (node) => {
                 this.selectedNode = node;
-                this.loadNodeDetails(node.node_id);
-                this.loadNodeDeviceMetrics(node.node_id);
-                this.loadNodeEnvironmentMetrics(node.node_id);
-                this.loadNodePowerMetrics(node.node_id);
-                this.loadNodeMqttMetrics(node.node_id);
-                this.loadNodeTraceroutes(node.node_id);
-                //this.loadNodePositionHistory(node.node_id);
+                this.refreshSelectedNodeData(node.node_id);
             };
 
             // handle node callback from outside of vue
@@ -1940,6 +1935,9 @@
                 this.nodes = nodes;
             };
 
+        },
+        beforeUnmount: function() {
+            this.stopSelectedNodeRefresh();
         },
         methods: {
             getAnnouncementId: function() {
@@ -1965,6 +1963,40 @@
                     // do nothing
                 });
             },
+            refreshSelectedNodeData: function(nodeId) {
+                if(nodeId == null){
+                    return;
+                }
+
+                this.loadNodeDetails(nodeId);
+                this.loadNodeDeviceMetrics(nodeId);
+                this.loadNodeEnvironmentMetrics(nodeId);
+                this.loadNodePowerMetrics(nodeId);
+                this.loadNodeMqttMetrics(nodeId);
+                this.loadNodeTraceroutes(nodeId);
+            },
+            startSelectedNodeRefresh: function(nodeId) {
+                this.stopSelectedNodeRefresh();
+
+                if(nodeId == null){
+                    return;
+                }
+
+                this.selectedNodeRefreshTimer = window.setInterval(() => {
+                    if(this.selectedNode?.node_id?.toString() !== nodeId.toString()){
+                        this.stopSelectedNodeRefresh();
+                        return;
+                    }
+
+                    this.refreshSelectedNodeData(nodeId);
+                }, 15000);
+            },
+            stopSelectedNodeRefresh: function() {
+                if(this.selectedNodeRefreshTimer != null){
+                    window.clearInterval(this.selectedNodeRefreshTimer);
+                    this.selectedNodeRefreshTimer = null;
+                }
+            },
             loadNodeDetails: function(nodeId) {
                 window.axios.get(`/api/v1/nodes/${nodeId}`).then((response) => {
                     const node = response.data.node;
@@ -1972,7 +2004,7 @@
                         return;
                     }
 
-                    window.upsertNodeInCache(node);
+                    window.mergeNodesIntoCache([node]);
                     if(this.selectedNode?.node_id?.toString() === node.node_id?.toString()){
                         this.selectedNode = node;
                     }
@@ -2009,10 +2041,18 @@
                         time_from: timeFrom,
                     },
                 }).then((response) => {
+                    if(this.selectedNode?.node_id?.toString() !== nodeId.toString()){
+                        return;
+                    }
+
                     // reverse response, as it's newest to oldest, but we want oldest to newest
                     this.selectedNodeDeviceMetrics = response.data.device_metrics.reverse();
                     this.renderDeviceMetricCharts();
                 }).catch(() => {
+                    if(this.selectedNode?.node_id?.toString() !== nodeId.toString()){
+                        return;
+                    }
+
                     this.selectedNodeDeviceMetrics = [];
                     this.renderDeviceMetricCharts();
                 });
@@ -2046,10 +2086,18 @@
                         time_from: timeFrom,
                     },
                 }).then((response) => {
+                    if(this.selectedNode?.node_id?.toString() !== nodeId.toString()){
+                        return;
+                    }
+
                     // reverse response, as it's newest to oldest, but we want oldest to newest
                     this.selectedNodeEnvironmentMetrics = response.data.environment_metrics.reverse();
                     this.renderEnvironmentMetricCharts();
                 }).catch(() => {
+                    if(this.selectedNode?.node_id?.toString() !== nodeId.toString()){
+                        return;
+                    }
+
                     this.selectedNodeEnvironmentMetrics = [];
                     this.renderEnvironmentMetricCharts();
                 });
@@ -2083,10 +2131,18 @@
                         time_from: timeFrom,
                     },
                 }).then((response) => {
+                    if(this.selectedNode?.node_id?.toString() !== nodeId.toString()){
+                        return;
+                    }
+
                     // reverse response, as it's newest to oldest, but we want oldest to newest
                     this.selectedNodePowerMetrics = response.data.power_metrics.reverse();
                     this.renderPowerMetricCharts();
                 }).catch(() => {
+                    if(this.selectedNode?.node_id?.toString() !== nodeId.toString()){
+                        return;
+                    }
+
                     this.selectedNodePowerMetrics = [];
                     this.renderPowerMetricCharts();
                 });
@@ -2094,6 +2150,10 @@
             loadNodeMqttMetrics: function(nodeId) {
                 this.selectedNodeMqttMetrics = [];
                 window.axios.get(`/api/v1/nodes/${nodeId}/mqtt-metrics`).then((response) => {
+                    if(this.selectedNode?.node_id?.toString() !== nodeId.toString()){
+                        return;
+                    }
+
                     this.selectedNodeMqttMetrics = response.data.mqtt_metrics;
                 }).catch(() => {
                     // do nothing
@@ -2106,6 +2166,10 @@
                         count: 5,
                     },
                 }).then((response) => {
+                    if(this.selectedNode?.node_id?.toString() !== nodeId.toString()){
+                        return;
+                    }
+
                     this.selectedNodeTraceroutes = response.data.traceroutes;
                 }).catch(() => {
                     // do nothing
@@ -2718,8 +2782,10 @@
                     return false;
                 }
 
-                const latitude = Number(node.latitude) / 10000000;
-                const longitude = Number(node.longitude) / 10000000;
+                const rawLatitude = Number(node.latitude);
+                const rawLongitude = Number(node.longitude);
+                const latitude = Math.abs(rawLatitude) > 90 ? rawLatitude / 10000000 : rawLatitude;
+                const longitude = Math.abs(rawLongitude) > 180 ? rawLongitude / 10000000 : rawLongitude;
                 return !isNaN(latitude) && !isNaN(longitude);
             },
         },
@@ -2782,14 +2848,33 @@
             configTemperatureFormat() {
                 window.setConfigTemperatureFormat(this.configTemperatureFormat);
             },
+            selectedNode(currentNode, previousNode) {
+                const currentNodeId = currentNode?.node_id?.toString() ?? null;
+                const previousNodeId = previousNode?.node_id?.toString() ?? null;
+
+                if(currentNodeId == null){
+                    this.stopSelectedNodeRefresh();
+                    return;
+                }
+
+                if(currentNodeId !== previousNodeId){
+                    this.startSelectedNodeRefresh(currentNodeId);
+                }
+            },
             deviceMetricsTimeRange() {
-                this.loadNodeDeviceMetrics(this.selectedNode.node_id);
+                if(this.selectedNode != null){
+                    this.loadNodeDeviceMetrics(this.selectedNode.node_id);
+                }
             },
             environmentMetricsTimeRange() {
-                this.loadNodeEnvironmentMetrics(this.selectedNode.node_id);
+                if(this.selectedNode != null){
+                    this.loadNodeEnvironmentMetrics(this.selectedNode.node_id);
+                }
             },
             powerMetricsTimeRange() {
-                this.loadNodePowerMetrics(this.selectedNode.node_id);
+                if(this.selectedNode != null){
+                    this.loadNodePowerMetrics(this.selectedNode.node_id);
+                }
             },
         },
     }).mount('#app');
@@ -3045,24 +3130,94 @@
 
     }
 
+    function normalizeNodeCoordinates(node) {
+        if(node == null){
+            return node;
+        }
+
+        const normalizedNode = {
+            ...node,
+        };
+
+        if(normalizedNode.latitude != null){
+            const latitude = Number(normalizedNode.latitude);
+            normalizedNode.latitude = Math.abs(latitude) > 90 ? latitude / 10000000 : latitude;
+        }
+
+        if(normalizedNode.longitude != null){
+            const longitude = Number(normalizedNode.longitude);
+            normalizedNode.longitude = Math.abs(longitude) > 180 ? longitude / 10000000 : longitude;
+        }
+
+        return normalizedNode;
+    }
+
     function upsertNodeInCache(node) {
         if(!node || node.node_id == null){
             return;
         }
 
+        node = normalizeNodeCoordinates(node);
         const nodeId = node.node_id.toString();
-        nodesById[nodeId] = node;
+        const existingNode = nodesById[nodeId] ?? null;
+        const mergedNode = existingNode != null ? { ...existingNode, ...node } : node;
+        nodesById[nodeId] = mergedNode;
 
         const existingNodeIndex = nodes.findIndex((existingNode) => existingNode.node_id.toString() === nodeId);
         if(existingNodeIndex === -1){
-            nodes.push(node);
+            nodes.push(mergedNode);
             return;
         }
 
-        nodes[existingNodeIndex] = node;
+        nodes[existingNodeIndex] = mergedNode;
+    }
+
+    function mergeNodesIntoCache(updatedNodes) {
+        const mergedNodesById = {
+            ...nodesById,
+        };
+
+        for(const updatedNode of updatedNodes ?? []){
+            if(!updatedNode || updatedNode.node_id == null){
+                continue;
+            }
+
+            const normalizedNode = normalizeNodeCoordinates(updatedNode);
+            const nodeId = normalizedNode.node_id.toString();
+            const existingNode = mergedNodesById[nodeId] ?? null;
+            mergedNodesById[nodeId] = existingNode != null ? { ...existingNode, ...normalizedNode } : normalizedNode;
+
+            const nodeMarker = findNodeMarkerById(normalizedNode.node_id);
+            if(nodeMarker != null && !isMobile()){
+                nodeMarker.unbindTooltip();
+                nodeMarker.bindTooltip(getTooltipContentForNode(mergedNodesById[nodeId]), {
+                    interactive: true,
+                });
+            }
+        }
+
+        nodesById = mergedNodesById;
+        nodes = Object.values(mergedNodesById);
+        window._onNodesUpdated(nodes);
+    }
+
+    async function loadNodeIntoCache(nodeId) {
+        try {
+            const response = await window.axios.get(`/api/v1/nodes/${nodeId}`);
+            const node = response.data?.node ?? null;
+            if(node == null){
+                return null;
+            }
+
+            mergeNodesIntoCache([node]);
+            return findNodeById(nodeId);
+        } catch(err) {
+            return null;
+        }
     }
 
     window.upsertNodeInCache = upsertNodeInCache;
+    window.mergeNodesIntoCache = mergeNodesIntoCache;
 
     function goToNode(id, animate, zoom){
 
@@ -3175,6 +3330,11 @@
         // find node
         const node = findNodeById(id);
         if(!node){
+            loadNodeIntoCache(id).then((loadedNode) => {
+                if(loadedNode != null){
+                    window._onNodeClick(loadedNode);
+                }
+            });
             return;
         }
 
@@ -3522,7 +3682,8 @@
         const configNeighboursMaxDistanceInMeters = getConfigNeighboursMaxDistanceInMeters();
 
         // add nodes
-        for(const node of uniqueUpdatedNodes){
+        for(const rawNode of uniqueUpdatedNodes){
+            const node = normalizeNodeCoordinates(rawNode);
 
             // skip nodes older than configured node max age
             if(configNodesMaxAgeInSeconds){
@@ -3540,10 +3701,6 @@
             if(node.latitude == null || node.longitude == null){
                 continue;
             }
-
-            // fix lat long
-            node.latitude = node.latitude / 10000000;
-            node.longitude = node.longitude / 10000000;
 
             // skip nodes with invalid position
             if(!isValidLatLng(node.latitude, node.longitude)){
@@ -3632,7 +3789,8 @@
 
         }
 
-        for(const node of uniqueUpdatedNodes){
+        for(const rawNode of uniqueUpdatedNodes){
+            const node = normalizeNodeCoordinates(rawNode);
 
             // find current node
             const currentNode = findNodeMarkerById(node.node_id);
@@ -3901,12 +4059,27 @@
 
         // clear previous data
         clearMap();
+        let backgroundAllNodesLoad = Promise.resolve();
 
-        // fetch nodes
-        await window.axios.get('/api/v1/nodes').then(async (response) => {
+        // fetch nodes required to draw the map
+        await window.axios.get('/api/v1/nodes', {
+            params: {
+                mappable_only: true,
+            },
+        }).then(async (response) => {
 
             // update nodes
             onNodesUpdated(response.data.nodes);
+
+            backgroundAllNodesLoad = window.axios.get('/api/v1/nodes', {
+                params: {
+                    view: 'search',
+                },
+            }).then((searchResponse) => {
+                mergeNodesIntoCache(searchResponse.data.nodes);
+            }).catch(() => {
+                // do nothing
+            });
 
             // hide loading
             setLoading(false);
@@ -3919,7 +4092,7 @@
                     return;
                 }
 
-                // fallback to showing node details since we can't go to the node
+                await backgroundAllNodesLoad;
                 window.showNodeDetails(goToNodeId);
 
             }
@@ -4045,7 +4218,7 @@
             (node.modem_preset_name != null ? `<br/>Modem Preset: ${node.modem_preset_name}` : '') +
             (node.has_default_channel != null ? `<br/>Has Default Channel: ${node.has_default_channel ? "Yes" : "No"}` : '');
 
-        if(node.battery_level){
+        if(node.battery_level != null){
             if(node.battery_level > 100){
                 tooltip += `<br/>Battery: ${node.battery_level > 100 ? 'Plugged In' : node.battery_level}`;
             } else {
@@ -4053,20 +4226,20 @@
             }
         }
 
-        if(node.voltage){
+        if(node.voltage != null){
             tooltip += `<br/>Voltage: ${Number(node.voltage).toFixed(2)}V`;
         }
 
-        if(node.channel_utilization){
+        if(node.channel_utilization != null){
             tooltip += `<br/>Ch Util: ${Number(node.channel_utilization).toFixed(2)}%`;
         }
 
-        if(node.air_util_tx){
+        if(node.air_util_tx != null){
             tooltip += `<br/>Air Util: ${Number(node.air_util_tx).toFixed(2)}%`;
         }
 
         // ignore alt above 42949000 due to https://github.com/meshtastic/firmware/issues/3109
-        if(node.altitude && node.altitude < 42949000){
+        if(node.altitude != null && node.altitude < 42949000){
             tooltip += `<br/>Altitude: ${node.altitude}m`;
         }
 
