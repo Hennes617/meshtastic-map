@@ -343,7 +343,7 @@ async function importNodeIdentitiesFromFile(prisma, filePath, options = {}) {
     return importNodeIdentitiesFromJsonPayload(prisma, payload, `file ${filePath}`, options);
 }
 
-async function importNodeIdentitiesFromUrl(prisma, url, options = {}) {
+async function fetchNodeIdentitiesPayloadFromUrl(url, options = {}) {
     const timeoutMs = options.timeout_ms ?? 15000;
     const abortController = new AbortController();
     const timeout = setTimeout(() => {
@@ -372,12 +372,21 @@ async function importNodeIdentitiesFromUrl(prisma, url, options = {}) {
         throw new Error(`Request failed with status ${response.status} ${response.statusText}`);
     }
 
-    const payload = await response.json();
+    return response.json();
+}
+
+async function importNodeIdentitiesFromUrl(prisma, url, options = {}) {
+    const payload = await fetchNodeIdentitiesPayloadFromUrl(url, options);
     return importNodeIdentitiesFromJsonPayload(prisma, payload, `URL ${url}`, options);
 }
 
 module.exports = {
+    buildImportedNodeIdentity,
+    fetchNodeIdentitiesPayloadFromUrl,
+    getExistingLongName,
+    getExistingShortName,
     getImportedHardwareModel,
+    getImportedNodesFromPayload,
     getMeaningfulLongName,
     getMeaningfulShortName,
     getMeaningfulString,

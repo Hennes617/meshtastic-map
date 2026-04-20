@@ -105,9 +105,13 @@ const deviceImageBasenameAliases = new Map(
         "TLORA_C6": "tlora-c6",
         "TLORA_V2_1_1P6": "tlora-v2-1-1_6",
         "TLORA_V2_1_1P8": "tlora-v2-1-1_8",
+        "T5_S3_EPAPER_PRO": "t5s3_epaper",
+        "TBEAM_1_WATT": "tbeam-1w",
         "TRACKER_T1000_E": "tracker-t1000-e",
         "WIO_WM1110": "wio-tracker-wm1110",
+        "WISMESH_TAG": "rak_wismesh_tag",
         "WISMESH_TAP": "rak-wismeshtap",
+        "WISMESH_TAP_V2": "rak-wismesh-tap-v2",
         "XIAO_NRF52_KIT": "seeed_xiao_nrf52_kit",
     }).map(([hardwareModelName, basename]) => [hardwareModelName, basename])
 );

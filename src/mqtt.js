@@ -8,8 +8,14 @@ const commandLineUsage = require("command-line-usage");
 const PositionUtil = require("./utils/position_util");
 const NodeIdUtil = require("./utils/node_id_util");
 const {
+    buildImportedNodeIdentity,
+    fetchNodeIdentitiesPayloadFromUrl,
+    getExistingLongName,
+    getExistingShortName,
+    getImportedNodesFromPayload,
     getMeaningfulLongName,
     getMeaningfulShortName,
+    hasKnownHardwareModel,
     importNodeIdentitiesFromUrl,
 } = require("./utils/node_identity_import");
 
@@ -291,15 +297,16 @@ if(options.help){
 }
 
 // get options and fallback to default values
+const DEFAULT_IDENTITY_SOURCE_URL = "https://k8scccow040o4wsc44cggsc8.bolte.lol/nodes.json";
 const protobufsPath = options["protobufs-path"] ?? path.join(path.dirname(__filename), "external/protobufs");
 const mqttBrokerUrl = options["mqtt-broker-url"] ?? "mqtt://mqtt.meshtastic.org";
 const mqttUsername = options["mqtt-username"] ?? "meshdev";
 const mqttPassword = options["mqtt-password"] ?? "large4cats";
 const mqttClientId = options["mqtt-client-id"] ?? `meshtastic-map-${crypto.randomBytes(4).toString("hex")}`;
 const mqttTopics = options["mqtt-topic"] ?? getDefaultMqttTopics(mqttBrokerUrl);
-const identityNameFailsafeUrl = options["identity-name-failsafe-url"] ?? "https://meshmap.net/nodes.json";
+const identityNameFailsafeUrl = options["identity-name-failsafe-url"] ?? null;
 const identitySourceUrls = [...new Set(options["identity-source-url"] ?? [
-    identityNameFailsafeUrl,
+    DEFAULT_IDENTITY_SOURCE_URL,
 ])];
 const identitySyncIntervalSeconds = options["identity-sync-interval-seconds"] ?? 21600;
 const hasIdentityFailsafeSource = Boolean(identityNameFailsafeUrl);
@@ -353,6 +360,8 @@ const MQTT_PACKET_TOPIC_REGEX = /^msh(?:\/[^/]+)+\/2\/(?:e\/[^/]+\/![0-9a-f]+|ma
 const IDENTITY_WARMUP_SYNC_DELAY_MS = 60000;
 const IDENTITY_EXPEDITED_SYNC_DELAY_MS = 30000;
 const IDENTITY_EXPEDITED_SYNC_MIN_INTERVAL_MS = 60000;
+const TARGETED_IDENTITY_SOURCE_CACHE_TTL_MS = 120000;
+const TARGETED_NODE_IDENTITY_LOOKUP_TTL_MS = 180000;
 
 const recentGatewayHeartbeatWrites = new Map();
 const recentPositionWrites = new Map();
@@ -364,10 +373,14 @@ const recentNodePositionUpdates = new Map();
 const recentNodeTelemetryUpdates = new Map();
 const recentNodeNeighbourUpdates = new Map();
 const recentMqttMessages = new Map();
+const recentNodeIdentityHydrationAttempts = new Map();
 
 const mqttMessageQueue = [];
 let activeMqttMessageProcessors = 0;
 let mqttQueueWarningShown = false;
+let targetedIdentitySourceNodesByIdCache = null;
+let targetedIdentitySourceNodesByIdCacheFetchedAt = 0;
+let targetedIdentitySourceNodesByIdCachePromise = null;
 
 function hasOwnField(message, fieldName) {
     return Object.prototype.hasOwnProperty.call(message ?? {}, fieldName);
@@ -406,6 +419,10 @@ async function updateNodeFields(nodeId, data) {
         },
         data: data,
     });
+
+    if(data.long_name == null || data.short_name == null || data.hardware_model == null){
+        triggerNodeIdentityHydration(nodeId, "packet-update-missing-identity");
+    }
 }
 
 function buildUserNodeData(user, nodeId) {
@@ -538,6 +555,7 @@ function purgeRecentWriteCaches() {
     purgeExpiredCacheEntries(recentNodeTelemetryUpdates);
     purgeExpiredCacheEntries(recentNodeNeighbourUpdates);
     purgeExpiredCacheEntries(recentMqttMessages);
+    purgeExpiredCacheEntries(recentNodeIdentityHydrationAttempts);
 }
 
 function shouldProcessMqttTopic(topic) {
@@ -581,6 +599,180 @@ function scheduleMqttMessageProcessing() {
     }
 }
 
+function getPrimaryIdentitySourceUrl() {
+    return identitySourceUrls[0] ?? identityNameFailsafeUrl ?? null;
+}
+
+async function getTargetedIdentitySourceNodesById(options = {}) {
+    const {
+        forceRefresh = false,
+    } = options;
+
+    const sourceUrl = getPrimaryIdentitySourceUrl();
+    if(sourceUrl == null){
+        return null;
+    }
+
+    const cacheIsFresh = targetedIdentitySourceNodesByIdCache != null
+        && (Date.now() - targetedIdentitySourceNodesByIdCacheFetchedAt) < TARGETED_IDENTITY_SOURCE_CACHE_TTL_MS;
+    if(!forceRefresh && cacheIsFresh){
+        return targetedIdentitySourceNodesByIdCache;
+    }
+
+    if(targetedIdentitySourceNodesByIdCachePromise != null){
+        return targetedIdentitySourceNodesByIdCachePromise;
+    }
+
+    targetedIdentitySourceNodesByIdCachePromise = (async () => {
+        try {
+            const payload = await fetchNodeIdentitiesPayloadFromUrl(sourceUrl, {
+                timeout_ms: 30000,
+            });
+            const nodesById = new Map();
+
+            for(const sourceNode of getImportedNodesFromPayload(payload)){
+                try {
+                    const sourceNodeId = NodeIdUtil.convertToNumeric(
+                        sourceNode?.node_id
+                        ?? sourceNode?.nodeId
+                        ?? sourceNode?.node_id_hex
+                        ?? sourceNode?.nodeIdHex
+                        ?? sourceNode?.id
+                    );
+                    nodesById.set(sourceNodeId.toString(), sourceNode);
+                } catch(err) {
+                    // ignore malformed node ids in external snapshots
+                }
+            }
+
+            targetedIdentitySourceNodesByIdCache = nodesById;
+            targetedIdentitySourceNodesByIdCacheFetchedAt = Date.now();
+            return nodesById;
+        } catch(err) {
+            if(targetedIdentitySourceNodesByIdCache != null){
+                console.warn(`Falling back to stale targeted identity cache for ${sourceUrl}: ${err.message}`);
+                return targetedIdentitySourceNodesByIdCache;
+            }
+
+            throw err;
+        } finally {
+            targetedIdentitySourceNodesByIdCachePromise = null;
+        }
+    })();
+
+    return targetedIdentitySourceNodesByIdCachePromise;
+}
+
+function nodeNeedsIdentityHydration(node) {
+    if(node == null){
+        return true;
+    }
+
+    return getExistingLongName(node.long_name) == null
+        || getExistingShortName(node.short_name, node.node_id) == null
+        || !hasKnownHardwareModel(node.hardware_model);
+}
+
+async function hydrateNodeIdentityFromPrimarySource(nodeId, reason, options = {}) {
+    const {
+        forceRefresh = false,
+    } = options;
+
+    const sourceUrl = getPrimaryIdentitySourceUrl();
+    if(nodeId == null || sourceUrl == null){
+        return false;
+    }
+
+    const nodeIdKey = nodeId.toString();
+    if(!forceRefresh && isRecentlySeen(recentNodeIdentityHydrationAttempts, nodeIdKey, TARGETED_NODE_IDENTITY_LOOKUP_TTL_MS)){
+        return false;
+    }
+
+    const existingNode = await prisma.node.findUnique({
+        where: {
+            node_id: nodeId,
+        },
+        select: {
+            node_id: true,
+            long_name: true,
+            short_name: true,
+            hardware_model: true,
+        },
+    });
+
+    if(existingNode != null && !nodeNeedsIdentityHydration(existingNode)){
+        return false;
+    }
+
+    let nodesById = await getTargetedIdentitySourceNodesById();
+    let sourceNode = nodesById?.get(nodeIdKey) ?? null;
+    if(sourceNode == null && !forceRefresh){
+        nodesById = await getTargetedIdentitySourceNodesById({
+            forceRefresh: true,
+        });
+        sourceNode = nodesById?.get(nodeIdKey) ?? null;
+    }
+
+    if(sourceNode == null){
+        return false;
+    }
+
+    const importedIdentity = buildImportedNodeIdentity(sourceNode, {
+        allowedFields: ["long_name", "short_name", "hardware_model"],
+    });
+    if(importedIdentity == null || Object.keys(importedIdentity.data).length === 0){
+        return false;
+    }
+
+    const data = {};
+    if(importedIdentity.data.long_name != null
+        && (existingNode == null || getExistingLongName(existingNode.long_name) == null)){
+        data.long_name = importedIdentity.data.long_name;
+    }
+
+    if(importedIdentity.data.short_name != null
+        && (existingNode == null || getExistingShortName(existingNode.short_name, nodeId) == null)){
+        data.short_name = importedIdentity.data.short_name;
+    }
+
+    if(importedIdentity.data.hardware_model != null
+        && (existingNode == null || !hasKnownHardwareModel(existingNode.hardware_model))){
+        data.hardware_model = importedIdentity.data.hardware_model;
+    }
+
+    if(Object.keys(data).length === 0){
+        return false;
+    }
+
+    await prisma.node.updateMany({
+        where: {
+            node_id: nodeId,
+        },
+        data: data,
+    });
+
+    console.log("Hydrated node identity from primary source", {
+        source: sourceUrl,
+        node_id: nodeIdKey,
+        reason: reason,
+        fields: Object.keys(data),
+    });
+
+    return true;
+}
+
+function triggerNodeIdentityHydration(nodeId, reason, options = {}) {
+    const sourceUrl = getPrimaryIdentitySourceUrl();
+    if(nodeId == null || sourceUrl == null){
+        return;
+    }
+
+    hydrateNodeIdentityFromPrimarySource(nodeId, reason, options)
+        .catch((err) => {
+            console.warn(`Targeted node identity hydration failed for ${nodeId.toString()} (${reason}): ${err.message}`);
+        });
+}
+
 async function ensureNodeExists(nodeId) {
     if(nodeId == null){
         return;
@@ -596,6 +788,7 @@ async function ensureNodeExists(nodeId) {
                 role: 0,
             },
         });
+        triggerNodeIdentityHydration(nodeId, "blank-node-created");
         scheduleIdentitySync("blank-node-created");
     } catch(err) {
         // ignore races where another packet creates the same node concurrently
