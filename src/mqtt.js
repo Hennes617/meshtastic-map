@@ -308,8 +308,9 @@ const mqttPassword = options["mqtt-password"] ?? "large4cats";
 const mqttClientId = options["mqtt-client-id"] ?? `meshtastic-map-${crypto.randomBytes(4).toString("hex")}`;
 const mqttTopics = options["mqtt-topic"] ?? getDefaultMqttTopics(mqttBrokerUrl);
 const identityNameFailsafeUrl = options["identity-name-failsafe-url"] ?? null;
-const identitySourceUrls = [...new Set(options["identity-source-url"] ?? [
+const identitySourceUrls = [...new Set([
     ...DEFAULT_IDENTITY_SOURCE_URLS,
+    ...(options["identity-source-url"] ?? []),
 ])];
 const identitySyncIntervalSeconds = options["identity-sync-interval-seconds"] ?? 21600;
 const hasIdentityFailsafeSource = Boolean(identityNameFailsafeUrl);
