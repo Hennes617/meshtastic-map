@@ -197,6 +197,9 @@ model Position {
   @@index(updated_at)
   @@index(node_id)
   @@index(packet_id)
+  @@index(to)
+  @@index(from)
+  @@index(gateway_id)
   @@index([node_id, created_at])
   @@map("positions")
 }
@@ -216,6 +219,8 @@ model ServiceEnvelope {
   @@index(created_at)
   @@index(updated_at)
   @@index(gateway_id)
+  @@index(to)
+  @@index(from)
   @@index([gateway_id, mqtt_topic, created_at])
   @@map("service_envelopes")
 }
@@ -229,7 +234,7 @@ model TextMessage {
   channel_id String
   gateway_id BigInt?
 
-  text String
+  text String @db.Text
 
   rx_time   BigInt?
   rx_snr    Decimal?
@@ -272,6 +277,7 @@ model TraceRoute {
   @@index(updated_at)
   @@index(to)
   @@index(from)
+  @@index(gateway_id)
   @@index([to, want_response, id])
   @@map("traceroutes")
 }
@@ -304,6 +310,7 @@ model Waypoint {
   @@index(waypoint_id)
   @@index(packet_id)
   @@index(gateway_id)
+  @@index(locked_to)
   @@index(expire)
   @@index([from, waypoint_id, id])
   @@map("waypoints")

@@ -50,103 +50,94 @@ This fork is maintained by Hennes Bolte for self-hosted deployments.
   - offline map tiles?
 - dedupe packets to prevent spamming database
 
-## Install
+## Quick start on macOS
 
-Clone the project repo.
+The easiest local setup uses Docker Desktop and includes MariaDB, schema setup, the MQTT collector and the map UI.
 
-```
+Requirements:
+
+- Docker Desktop for Mac
+- Git
+
+```sh
 git clone https://github.com/Hennes617/meshtastic-map
 cd meshtastic-map
+cp .env.example .env
 ```
 
-Install NodeJS dependencies
+Change `MARIADB_ROOT_PASSWORD` in `.env` to a strong value containing URL-safe characters (letters, digits, `_`, `-`), then start the stack:
 
-```
-npm install
-```
-
-Create a `.env` environment file.
-
-```
-touch .env
+```sh
+docker compose up --build -d
+docker compose ps
 ```
 
-Add a database [connection string for prisma](https://www.prisma.io/docs/getting-started/setup-prisma/add-to-existing-project/relational-databases/connect-your-database-typescript-postgresql) to `.env` file.
+Open [http://127.0.0.1:8081](http://127.0.0.1:8081). Follow logs with `docker compose logs -f meshtastic-map meshtastic-mqtt` and stop everything with `docker compose down`. Database data remains in the named Docker volume.
 
-```
-DATABASE_URL="mysql://root@localhost:3306/meshtastic-map?connection_limit=100"
-```
+The published ports bind to `127.0.0.1` by default. Put an authenticated, TLS-enabled reverse proxy in front of the service before exposing it publicly.
 
-> Note: Some queries are MySQL specific. Other db providers have not been tested.
+## Manual install
 
-Migrate the database.
+Use Node.js 20 or newer and a MySQL/MariaDB database. Some API queries are MySQL-specific; other database providers are not supported.
 
-```
-npx prisma migrate dev
-```
-
-Run the MQTT listener, to save packets to database.
-
-```
-node src/mqtt.js
+```sh
+git clone https://github.com/Hennes617/meshtastic-map
+cd meshtastic-map
+npm ci
+cp .env.example .env
 ```
 
-Run the Express Server, to serve the `/api` and Map UI.
+Set `DATABASE_URL` in `.env`, apply the schema and start the web UI:
 
-```
-node src/index.js
+```sh
+npx prisma migrate deploy
+npm start
 # Server running at http://127.0.0.1:8080
 ```
 
-> Note: You can also use a custom port with `--port 8123`
+Use `npm start -- --port 8123` for a custom port. The collector additionally needs the Meshtastic protobuf checkout described below:
+
+```sh
+npm run start:mqtt
+```
 
 ## Upgrading
 
-Run the following commands from inside the `meshtastic-map` repo.
+For the Docker setup, update the checkout and rebuild the services. Container startup synchronizes the Prisma schema with the Compose-managed database:
 
-```
-# update repo
-git fetch && git pull
-
-# migrate database
-npx prisma migrate dev
+```sh
+git pull --ff-only
+docker compose up --build -d
+docker compose ps
 ```
 
-You will now need to restart the `index.js` and `mqtt.js` scripts.
+For a manual installation created with Prisma migrations, use the migration workflow instead:
+
+```sh
+git pull --ff-only
+npm ci
+npx prisma generate
+npx prisma migrate deploy
+```
+
+Do not run `migrate deploy` against a Docker database originally created by this project's `db push` startup flow unless you have explicitly [baselined that database](https://www.prisma.io/docs/orm/prisma-migrate/workflows/baselining).
 
 ## MQTT Collector
 
 > Please note, due to the Meshtastic protobuf schema files being locked under a GPLv3 license, these are not provided in this MIT licensed project.
 You will need to obtain these files yourself to be able to use the MQTT Collector.
 
-By default, the [MQTT Collector](./src/mqtt.js) connects to the public Meshtastic MQTT server.
-Alternatively, you may provide the relevant options shown in the help section below to connect to your own MQTT server along with your own decryption keys.
+Clone the schemas into the default local path before a manual collector start:
 
+```sh
+git clone https://github.com/meshtastic/protobufs src/external/protobufs
+npm run start:mqtt
 ```
-node src/mqtt.js --help
-```
 
-```
-Meshtastic MQTT Collector
+By default, the [MQTT Collector](./src/mqtt.js) connects to the public Meshtastic broker, generates a unique client ID, bounds its in-memory queue and accepts the default channel key. View the always-current options for custom brokers, collection types, identity sources, filters, retention, concurrency and queue limits with:
 
-  Collects and processes service envelopes from a Meshtastic MQTT server.
-
-Options
-
-  -h, --help                                    Display this usage guide.
-  --mqtt-broker-url string                      MQTT Broker URL (e.g: mqtt://mqtt.meshtastic.org)
-  --mqtt-username string                        MQTT Username (e.g: meshdev)
-  --mqtt-password string                        MQTT Password (e.g: large4cats)
-  --mqtt-client-id string                       MQTT Client ID (e.g: map.example.com)
-  --mqtt-topic                                  MQTT Topic to subscribe to (e.g: msh/+/2/e/#)
-  --collect-service-envelopes                   This option will save all received service envelopes to the database.
-  --collect-text-messages                       This option will save all received text messages to the database.
-  --collect-waypoints                           This option will save all received waypoints to the database.
-  --collect-neighbour-info                      This option will save all received neighbour infos to the database.
-  --collect-map-reports                         This option will save all received map reports to the database.
-  --decryption-keys <base64DecryptionKey> ...   Decryption keys encoded in base64 to use when decrypting service envelopes.
-  --purge-interval-seconds number               How long to wait between each automatic database purge.
-  --purge-nodes-unheard-for-seconds number      Nodes that haven't been heard from in this many seconds will be purged from the database.
+```sh
+npm run start:mqtt -- --help
 ```
 
 To connect to your own MQTT server, you could do something like the following;
@@ -157,60 +148,44 @@ node src/mqtt.js --mqtt-broker-url mqtt://mqtt.example.com --mqtt-username usern
 
 ## MQTT Connection Status
 
-> TODO: update this section as this info is now outdated. MQTT status is determined based on a timestamp we update when a packet is gated to MQTT by that node.
+Marker colour reflects when a node most recently acted as an MQTT gateway, rather than a durable broker session:
 
-The map shows a different coloured icon for nodes based on their connection state to MQTT.
+- `Green`: recently uplinked a packet to MQTT.
+- `Blue`: no recent MQTT uplink within the configured threshold.
+- `Red`: the node itself has not been updated within the optional offline threshold.
 
-- `Green`: Online (connected to MQTT)
-- `Blue`: Offline (disconnected from MQTT)
-
-This works by listening to `/stat/!ID` topics on the MQTT server.
-
-When a node connects to MQTT it publishes `online` to the topic, and when the MQTT server detects the client has disconnected (via an [LWT](https://www.hivemq.com/blog/mqtt-essentials-part-9-last-will-and-testament/)) it publishes `offline` to the topic.
-
-The Meshtastic [firmware configures](https://github.com/meshtastic/firmware/blob/279464f96d5139920b017d437501233737daf407/src/mqtt/MQTT.cpp#L330) an [LWT](https://www.hivemq.com/blog/mqtt-essentials-part-9-last-will-and-testament/) (Last Will and Testament), which the MQTT server publishes upon client disconnect.
-
-After a node boots up, there is a ~30 second delay before the `online` state is published.
-After a node disconnects from MQTT, there is a ~30 second delay before the `offline` state is published.
-
-This works well when your node connects to MQTT over WiFi, however, when using the `MQTT Client Proxy` feature, your node sends/receives packets to/from your Android/iOS device, and then your device connects to MQTT and proxies the messages.
-
-```
-Meshtastic Node <-> Android/iOS <-> MQTT
-```
-
-Unfortunately, when using that feature your `online` / `offline` states will not work as expected.
-
-As of the time of writing these docs, the mobile devices do not correctly configure the LWT for the node being proxied, and thus do not publish the `offline` state for the node, so you can't detect if your node disconnected from MQTT.
-
-Your node will stay "stuck" in the `online` state in the MQTT server.
+This is an activity indicator, not proof that a radio is currently reachable.
 
 ## Docker Compose
 
-A [docker-compose.yml](./docker-compose.yml) is available. You can run the following command to launch everything;
+A [docker-compose.yml](./docker-compose.yml) is available. You can run the following command to launch everything:
 
-```
-docker compose up
+```sh
+docker compose up --build -d
 ```
 
 This will:
 
 - Start a MariaDB database server.
-- Run the database migrations.
+- Synchronize the Prisma schema.
 - Start the MQTT collector.
 - Start the Map UI.
 - Expose the map on host port `8081` by default (override with `MAP_PORT`).
 
 On container start, the MQTT service will automatically clone the Meshtastic protobuf repository into `src/external/protobufs` if it is missing.
-You can disable that with `AUTO_FETCH_PROTOBUFS=false` or pin a specific ref with `PROTOBUFS_GIT_REF`.
+You can disable that with `AUTO_FETCH_PROTOBUFS=false` or pin a specific ref with `PROTOBUFS_GIT_REF`; pinning is recommended for reproducible production deployments.
 
-## Testing
+## Testing and health
 
-To execute unit tests, run the following;
-
+```sh
+npm run check
+# Manual Node.js server (default)
+curl --fail http://127.0.0.1:8080/api/v1/health
+# Docker Compose (default MAP_PORT)
+curl --fail http://127.0.0.1:8081/api/v1/health
 ```
-npm run test
-```
+
+`npm run check` runs syntax validation and all unit tests. The health endpoint checks that the HTTP process is alive and its database connection is usable.
 
 ## Contributing
 

@@ -1,195 +1,315 @@
-<html>
+<!doctype html>
+<html lang="en">
 <head>
-
     <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
     <title>Meshtastic Messages</title>
 
-    <!-- tailwind css -->
     <script src="/assets/js/tailwindcss/tailwind-v3.4.3-forms-v0.5.7.js"></script>
-
-    <!-- moment -->
     <script src="/assets/js/moment@2.29.1/moment.min.js"></script>
-
-    <!-- vuejs -->
     <script src="/assets/js/vue@3.4.26/dist/vue.global.js"></script>
-
-    <!-- axios -->
     <script src="/assets/js/axios@1.6.8/dist/axios.min.js"></script>
 
     <style>
-
-        /* used to prevent ui flicker before vuejs loads */
         [v-cloak] {
             display: none;
         }
 
+        :root {
+            color-scheme: light;
+            --surface: rgba(255, 255, 255, 0.94);
+            --surface-muted: #f6f2ea;
+            --border-soft: #ddd6ca;
+            --text-main: #161616;
+            --text-muted: #625d55;
+            --accent: #115e59;
+        }
+
+        html,
+        body,
+        #app {
+            height: 100%;
+            margin: 0;
+        }
+
+        body {
+            background:
+                radial-gradient(circle at top left, rgba(17, 94, 89, 0.08), transparent 32%),
+                linear-gradient(180deg, #faf8f4 0%, #f3efe8 100%);
+            color: var(--text-main);
+        }
+
+        .messages-header {
+            padding-top: max(0.75rem, env(safe-area-inset-top));
+            background: var(--surface);
+            border-bottom: 1px solid var(--border-soft);
+            backdrop-filter: blur(16px);
+        }
+
+        .message-bubble {
+            max-width: min(36rem, calc(100vw - 5.5rem));
+            border: 1px solid var(--border-soft);
+            border-radius: 1rem;
+            background: rgba(255, 255, 255, 0.94);
+            box-shadow: 0 8px 20px rgba(28, 25, 23, 0.06);
+            overflow: hidden;
+        }
+
+        .message-text {
+            white-space: pre-wrap;
+            overflow-wrap: anywhere;
+            word-break: break-word;
+        }
+
+        .focus-ring:focus-visible {
+            outline: 3px solid rgba(17, 94, 89, 0.35);
+            outline-offset: 2px;
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+            *,
+            *::before,
+            *::after {
+                scroll-behavior: auto !important;
+                transition-duration: 0.01ms !important;
+                animation-duration: 0.01ms !important;
+                animation-iteration-count: 1 !important;
+            }
+        }
     </style>
-
 </head>
-<body class="h-full">
-<div id="app" v-cloak>
-    <div class="h-full flex flex-col overflow-hidden">
+<body>
+<div id="app" v-cloak class="flex h-full min-h-0 flex-col overflow-hidden">
+    <header class="messages-header flex flex-none items-center gap-3 px-4 pb-3">
+        <div class="min-w-0 flex-1">
+            <h1 class="truncate text-base font-semibold tracking-tight">Meshtastic Messages</h1>
+            <p class="text-xs text-stone-600">Public MQTT messages · updates every 5 seconds</p>
+        </div>
+        <div class="flex flex-none items-center gap-1.5 text-xs text-stone-600" aria-live="polite">
+            <span class="h-2 w-2 rounded-full" :class="isDocumentHidden ? 'bg-stone-400' : 'bg-emerald-600'" aria-hidden="true"></span>
+            <span>{{ isDocumentHidden ? "Paused" : "Live" }}</span>
+        </div>
+    </header>
 
-        <!-- empty state -->
-        <div v-if="messages.length === 0" class="flex h-full">
-            <div class="flex flex-col mx-auto my-auto p-4 text-gray-500 text-center">
-                <div class="mb-2 mx-auto">
-                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-10">
-                        <path stroke-linecap="round" stroke-linejoin="round" d="M20.25 8.511c.884.284 1.5 1.128 1.5 2.097v4.286c0 1.136-.847 2.1-1.98 2.193-.34.027-.68.052-1.02.072v3.091l-3-3c-1.354 0-2.694-.055-4.02-.163a2.115 2.115 0 0 1-.825-.242m9.345-8.334a2.126 2.126 0 0 0-.476-.095 48.64 48.64 0 0 0-8.048 0c-1.131.094-1.976 1.057-1.976 2.192v4.286c0 .837.46 1.58 1.155 1.951m9.345-8.334V6.637c0-1.621-1.152-3.026-2.76-3.235A48.455 48.455 0 0 0 11.25 3c-2.115 0-4.198.137-6.24.402-1.608.209-2.76 1.614-2.76 3.235v6.226c0 1.621 1.152 3.026 2.76 3.235.577.075 1.157.14 1.74.194V21l4.155-4.155" />
-                    </svg>
-                </div>
-                <div class="font-semibold">No Messages</div>
-                <div>There's no messages yet...</div>
+    <div v-if="errorMessage && messages.length > 0" class="flex flex-none items-center gap-3 border-b border-red-200 bg-red-50 px-4 py-2 text-sm text-red-800" role="alert">
+        <span class="min-w-0 flex-1">{{ errorMessage }}</span>
+        <button type="button" @click="retryLoad" class="focus-ring flex-none rounded-full border border-red-300 bg-white px-3 py-1 font-medium hover:bg-red-100">Retry</button>
+    </div>
+
+    <main class="min-h-0 flex-1">
+        <div v-if="isInitialLoading" class="flex h-full items-center justify-center p-6" role="status" aria-live="polite">
+            <div class="flex flex-col items-center gap-3 text-center text-stone-600">
+                <svg class="h-7 w-7 animate-spin" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" aria-hidden="true">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 0 1 8-8v4a4 4 0 0 0-4 4H4Z"></path>
+                </svg>
+                <p class="font-medium">Loading messages…</p>
             </div>
         </div>
 
-        <!-- note: must use flex-col-reverse to prevent ui scrolling when adding older messages to ui -->
-        <div v-show="messages.length > 0" id="messages" class="h-full flex flex-col-reverse p-3 overflow-y-auto">
-
-            <!-- messages -->
-            <div :key="message.id" v-for="message of reversedMessages" class="max-w-xl items-start my-1.5">
-
-                <div class="flex">
-
-                    <div class="mr-2 mt-2">
-                        <a target="_blank" :href="`/?node_id=${message.from}`">
-                            <div class="flex rounded-full h-12 w-12 text-white shadow" :class="[ `bg-[${getNodeColour(message.from)}]`, `text-[${getNodeTextColour(message.from)}]` ]">
-                                <div class="mx-auto my-auto drop-shadow-sm">{{ getNodeShortName(message.from) }}</div>
-                            </div>
-                        </a>
-                    </div>
-
-                    <div class="flex flex-col">
-
-                        <!-- sender -->
-                        <div class="text-xs text-gray-500">
-                            <a target="_blank" :href="`/?node_id=${message.from}`" class="hover:text-blue-500">
-                                <span>{{ getNodeLongName(message.from) }}</span>
-                            </a>
-                            <span v-if="message.to.toString() !== '4294967295'">
-                                <span> → </span>
-                                <a target="_blank" :href="`/?node_id=${message.to}`" class="hover:text-blue-500">{{ getNodeName(message.to) }}</a>
-                            </span>
-                        </div>
-
-                        <!-- message -->
-                        <div @click="message.is_details_expanded = !message.is_details_expanded" class="flex">
-                            <div class="border border-gray-300 rounded-xl shadow overflow-hidden bg-[#efefef] divide-y">
-                                <div class="w-full space-y-0.5 px-2.5 py-1" v-html="escapeMessageText(message.text)" style="white-space:pre-wrap;word-break:break-word;"></div>
-                                <div v-if="message.is_details_expanded" class="text-xs text-gray-500 px-2 py-1">
-                                    <span :title="message.created_at">{{ formatMessageTimestamp(message.created_at) }}</span>
-                                    <span> • Gated by <a target="_blank" :href="`/?node_id=${message.gateway_id}`" class="hover:text-blue-500">{{ getNodeName(message.gateway_id) }}</a></span>
-                                </div>
-                            </div>
-                        </div>
-
-                    </div>
-
-                </div>
-
+        <div v-else-if="errorMessage && messages.length === 0" class="flex h-full items-center justify-center p-6">
+            <div class="max-w-sm rounded-2xl border border-red-200 bg-red-50 p-5 text-center shadow-sm" role="alert">
+                <h2 class="font-semibold text-red-900">Messages unavailable</h2>
+                <p class="mt-1 text-sm text-red-800">{{ errorMessage }}</p>
+                <button type="button" @click="retryLoad" class="focus-ring mt-4 rounded-full border border-red-300 bg-white px-4 py-2 text-sm font-medium text-red-900 hover:bg-red-100">Try again</button>
             </div>
+        </div>
 
-            <!-- load previous -->
-            <button v-show="!isLoadingPrevious && hasMorePrevious" id="load-previous" @click="loadPrevious" type="button" class="flex space-x-2 mx-auto bg-gray-200 px-3 py-1 hover:bg-gray-300 rounded-full shadow">
-                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-6">
+        <div v-else-if="messages.length === 0" class="flex h-full items-center justify-center p-6" role="status">
+            <div class="flex max-w-sm flex-col items-center text-center text-stone-600">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="mb-3 h-10 w-10" aria-hidden="true">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M20.25 8.511c.884.284 1.5 1.128 1.5 2.097v4.286c0 1.136-.847 2.1-1.98 2.193-.34.027-.68.052-1.02.072v3.091l-3-3c-1.354 0-2.694-.055-4.02-.163a2.115 2.115 0 0 1-.825-.242m9.345-8.334a2.126 2.126 0 0 0-.476-.095 48.64 48.64 0 0 0-8.048 0c-1.131.094-1.976 1.057-1.976 2.192v4.286c0 .837.46 1.58 1.155 1.951m9.345-8.334V6.637c0-1.621-1.152-3.026-2.76-3.235A48.455 48.455 0 0 0 11.25 3c-2.115 0-4.198.137-6.24.402-1.608.209-2.76 1.614-2.76 3.235v6.226c0 1.621 1.152 3.026 2.76 3.235.577.075 1.157.14 1.74.194V21l4.155-4.155" />
+                </svg>
+                <h2 class="font-semibold text-stone-800">No messages yet</h2>
+                <p class="mt-1 text-sm">New public messages matching this view will appear automatically.</p>
+            </div>
+        </div>
+
+        <!-- In a reverse flex column, scrollTop === 0 is the visual bottom. -->
+        <div v-show="messages.length > 0" ref="messages" id="messages" class="flex h-full min-h-0 flex-col-reverse overflow-y-auto p-3" aria-label="Message history">
+            <article v-for="message of reversedMessages" :key="message.id" class="my-1.5 flex max-w-xl items-start">
+                <a target="_blank" rel="noopener noreferrer" :href="`/?node_id=${message.from}`" class="focus-ring mr-2 mt-1 flex h-12 w-12 flex-none items-center justify-center rounded-full font-medium shadow" :style="{ backgroundColor: getNodeColour(message.from), color: getNodeTextColour(message.from) }" :aria-label="`Open ${getNodeLongName(message.from)} on the map`">
+                    <span aria-hidden="true">{{ getNodeShortName(message.from) }}</span>
+                </a>
+
+                <div class="min-w-0 flex-1">
+                    <div class="mb-1 text-xs text-stone-600">
+                        <a target="_blank" rel="noopener noreferrer" :href="`/?node_id=${message.from}`" class="focus-ring rounded hover:text-teal-800 hover:underline">{{ getNodeLongName(message.from) }}</a>
+                        <template v-if="String(message.to) !== '4294967295'">
+                            <span aria-hidden="true"> → </span>
+                            <a target="_blank" rel="noopener noreferrer" :href="`/?node_id=${message.to}`" class="focus-ring rounded hover:text-teal-800 hover:underline">{{ getNodeName(message.to) }}</a>
+                        </template>
+                    </div>
+
+                    <div class="message-bubble">
+                        <button type="button" @click="message.is_details_expanded = !message.is_details_expanded" class="focus-ring message-text block w-full px-3 py-2 text-left" :aria-expanded="message.is_details_expanded" :aria-controls="`message-details-${message.id}`">
+                            {{ message.text }}
+                        </button>
+                        <div v-if="message.is_details_expanded" :id="`message-details-${message.id}`" class="border-t border-stone-200 px-3 py-2 text-xs text-stone-600">
+                            <time :datetime="message.created_at" :title="message.created_at">{{ formatMessageTimestamp(message.created_at) }}</time>
+                            <template v-if="message.gateway_id != null">
+                                <span aria-hidden="true"> · </span>
+                                <span>Gated by <a target="_blank" rel="noopener noreferrer" :href="`/?node_id=${message.gateway_id}`" class="focus-ring rounded hover:text-teal-800 hover:underline">{{ getNodeName(message.gateway_id) }}</a></span>
+                            </template>
+                        </div>
+                    </div>
+                </div>
+            </article>
+
+            <button v-show="hasMorePrevious" ref="loadPrevious" id="load-previous" @click="loadPrevious" type="button" :disabled="isLoadingPrevious" class="focus-ring mx-auto my-2 flex items-center gap-2 rounded-full border border-stone-300 bg-white px-4 py-2 text-sm font-medium text-stone-800 shadow-sm hover:bg-stone-100 disabled:cursor-wait disabled:opacity-70">
+                <svg v-if="isLoadingPrevious" class="h-5 w-5 animate-spin" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" aria-hidden="true">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 0 1 8-8v4a4 4 0 0 0-4 4H4Z"></path>
+                </svg>
+                <svg v-else xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="h-5 w-5" aria-hidden="true">
                     <path stroke-linecap="round" stroke-linejoin="round" d="m15 11.25-3-3m0 0-3 3m3-3v7.5M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
                 </svg>
-                <span>Load Previous</span>
+                <span>{{ isLoadingPrevious ? "Loading…" : "Load previous" }}</span>
             </button>
-
         </div>
-
-    </div>
+    </main>
 </div>
 
 <script>
     Vue.createApp({
         data() {
             return {
-
                 to: null,
                 from: null,
                 channelId: null,
                 gatewayId: null,
+                directMessageNodeIds: null,
+                count: null,
 
+                isInitialLoading: true,
                 isLoadingPrevious: false,
                 isLoadingMore: false,
                 shouldAutoScroll: true,
-                loadPreviousObserver: null,
                 hasMorePrevious: true,
+                errorMessage: "",
+                isDocumentHidden: document.hidden,
+
+                loadPreviousObserver: null,
+                pollTimer: null,
+                scrollHandler: null,
+                visibilityHandler: null,
 
                 messages: [],
                 nodesById: {},
-
-                moment: window.moment,
-
             };
         },
-        mounted: function() {
-
-            // parse url params
+        mounted() {
             const queryParams = new URLSearchParams(window.location.search);
-            this.to = queryParams.get('to');
-            this.from = queryParams.get('from');
-            this.channelId = queryParams.get('channel_id');
-            this.gatewayId = queryParams.get('gateway_id');
-            this.directMessageNodeIds = queryParams.get('direct_message_node_ids');
-            this.count = queryParams.get('count');
+            this.to = queryParams.get("to");
+            this.from = queryParams.get("from");
+            this.channelId = queryParams.get("channel_id");
+            this.gatewayId = queryParams.get("gateway_id");
+            this.directMessageNodeIds = queryParams.get("direct_message_node_ids");
+            this.count = queryParams.get("count");
 
-            // listen for scrolling of messages list
-            document.getElementById("messages").addEventListener("scroll", (event) => {
+            this.scrollHandler = this.onMessagesScroll;
+            this.$refs.messages.addEventListener("scroll", this.scrollHandler, { passive: true });
 
-                // check if messages is scrolled to bottom
-                const element = event.target;
-                const isAtBottom = element.scrollTop === (element.scrollHeight - element.offsetHeight);
+            this.visibilityHandler = this.onVisibilityChange;
+            document.addEventListener("visibilitychange", this.visibilityHandler);
 
-                // we want to auto scroll if user is at bottom of messages list
-                this.shouldAutoScroll = isAtBottom;
-
-            });
-
-            // setup intersection observer
-            this.loadPreviousObserver = new IntersectionObserver((entries) => {
-                const loadMoreElement = entries[0];
-                if(loadMoreElement && loadMoreElement.isIntersecting){
-                    this.loadPrevious();
-                }
-            });
+            if("IntersectionObserver" in window){
+                this.loadPreviousObserver = new IntersectionObserver((entries) => {
+                    if(entries[0]?.isIntersecting && this.hasMorePrevious){
+                        this.loadPrevious();
+                    }
+                }, {
+                    root: this.$refs.messages,
+                    rootMargin: "120px 0px",
+                });
+            }
 
             this.initialLoad();
-
+        },
+        beforeUnmount() {
+            this.stopPolling();
+            this.loadPreviousObserver?.disconnect();
+            if(this.scrollHandler != null){
+                this.$refs.messages?.removeEventListener("scroll", this.scrollHandler);
+            }
+            if(this.visibilityHandler != null){
+                document.removeEventListener("visibilitychange", this.visibilityHandler);
+            }
         },
         methods: {
             async initialLoad() {
-
-                // load 1 page of previous messages
+                this.isInitialLoading = true;
+                this.errorMessage = "";
                 await this.loadPrevious();
-
-                // scroll to bottom
+                this.isInitialLoading = false;
                 this.scrollToBottom();
 
-                // setup auto loading previous
-                this.loadPreviousObserver.observe(document.querySelector("#load-previous"));
-
-                // load more every few seconds
-                setInterval(async () => {
-                    await this.loadMore();
-                }, 2500);
-
+                if(this.loadPreviousObserver != null && this.$refs.loadPrevious){
+                    this.loadPreviousObserver.observe(this.$refs.loadPrevious);
+                }
+                this.startPolling();
+            },
+            async retryLoad() {
+                this.errorMessage = "";
+                if(this.messages.length === 0){
+                    this.hasMorePrevious = true;
+                    await this.initialLoad();
+                    return;
+                }
+                await this.loadMore();
+            },
+            onMessagesScroll(event) {
+                // Reverse columns use zero at the visual bottom and negative values above it.
+                this.shouldAutoScroll = Math.abs(event.currentTarget.scrollTop) <= 2;
+            },
+            onVisibilityChange() {
+                this.isDocumentHidden = document.hidden;
+                if(document.hidden){
+                    this.stopPolling();
+                    return;
+                }
+                this.loadMore();
+                this.startPolling();
+            },
+            startPolling() {
+                if(this.pollTimer != null || document.hidden){
+                    return;
+                }
+                this.pollTimer = window.setInterval(() => {
+                    this.loadMore();
+                }, 5000);
+            },
+            stopPolling() {
+                if(this.pollTimer != null){
+                    window.clearInterval(this.pollTimer);
+                    this.pollTimer = null;
+                }
+            },
+            mergeMessages(incomingMessages) {
+                const messagesById = new Map(this.messages.map((message) => [String(message.id), message]));
+                for(const incomingMessage of incomingMessages){
+                    const key = String(incomingMessage.id);
+                    const existingMessage = messagesById.get(key);
+                    messagesById.set(key, {
+                        ...existingMessage,
+                        ...incomingMessage,
+                        is_details_expanded: existingMessage?.is_details_expanded ?? false,
+                    });
+                }
+                this.messages = Array.from(messagesById.values()).sort((messageA, messageB) => {
+                    const idA = BigInt(messageA.id);
+                    const idB = BigInt(messageB.id);
+                    return idA < idB ? -1 : idA > idB ? 1 : 0;
+                });
             },
             async loadPrevious() {
-
-                // do nothing if already loading
-                if(this.isLoadingPrevious){
+                if(this.isLoadingPrevious || !this.hasMorePrevious){
                     return;
                 }
 
                 this.isLoadingPrevious = true;
-
                 try {
-
-                    const response = await window.axios.get('/api/v1/text-messages', {
+                    const response = await window.axios.get("/api/v1/text-messages", {
                         params: {
                             to: this.to,
                             from: this.from,
@@ -202,42 +322,32 @@
                         },
                     });
 
-                    // add messages to start of existing messages
-                    const messages = response.data.text_messages;
-                    for(const message of messages){
-                        this.messages.unshift(message);
+                    const messages = response.data?.text_messages;
+                    if(!Array.isArray(messages)){
+                        throw new Error("Invalid message response");
                     }
-
-                    // no more previous to load if previous list is empty
+                    this.mergeMessages(messages);
                     if(messages.length === 0){
                         this.hasMorePrevious = false;
                     }
-
-                    await this.fetchNodeInfos(messages.flatMap((message) => [
-                        message.to,
-                        message.from,
-                        message.gateway_id,
-                    ]));
-
-                } catch(e) {
-                    // do nothing
+                    this.errorMessage = "";
+                    this.fetchNodeInfos(this.nodeIdsForMessages(messages));
+                } catch(error) {
+                    console.error("Previous messages could not be loaded.", error);
+                    this.errorMessage = "Previous messages could not be loaded. Check your connection and try again.";
                 } finally {
                     this.isLoadingPrevious = false;
                 }
-
             },
             async loadMore() {
-
-                // do nothing if already loading
                 if(this.isLoadingMore){
                     return;
                 }
 
                 this.isLoadingMore = true;
-
+                const wasAtBottom = this.shouldAutoScroll;
                 try {
-
-                    const response = await window.axios.get('/api/v1/text-messages', {
+                    const response = await window.axios.get("/api/v1/text-messages", {
                         params: {
                             to: this.to,
                             from: this.from,
@@ -250,166 +360,104 @@
                         },
                     });
 
-                    // add messages to end of existing messages
-                    const messages = response.data.text_messages;
-                    for(const message of messages){
-                        this.messages.push(message);
+                    const messages = response.data?.text_messages;
+                    if(!Array.isArray(messages)){
+                        throw new Error("Invalid message response");
                     }
-
-                    // scroll to bottom
-                    if(this.shouldAutoScroll){
+                    this.mergeMessages(messages);
+                    this.errorMessage = "";
+                    if(wasAtBottom){
                         this.scrollToBottom();
                     }
-
-                    await this.fetchNodeInfos(messages.flatMap((message) => [
-                        message.to,
-                        message.from,
-                        message.gateway_id,
-                    ]));
-
-                } catch(e) {
-                    // do nothing
+                    this.fetchNodeInfos(this.nodeIdsForMessages(messages));
+                } catch(error) {
+                    console.error("New messages could not be loaded.", error);
+                    this.errorMessage = "Live updates are temporarily unavailable.";
                 } finally {
                     this.isLoadingMore = false;
                 }
-
+            },
+            nodeIdsForMessages(messages) {
+                return messages.flatMap((message) => [
+                    message.to,
+                    message.from,
+                    message.gateway_id,
+                ]);
             },
             async fetchNodeInfos(nodeIds) {
-
                 const idsToFetch = [...new Set(
                     nodeIds
                         .filter((nodeId) => nodeId != null)
-                        .map((nodeId) => nodeId.toString())
-                )].filter((nodeId) => {
-                    return !(nodeId in this.nodesById) && nodeId !== "4294967295";
-                });
+                        .map((nodeId) => String(nodeId)),
+                )].filter((nodeId) => !(nodeId in this.nodesById) && nodeId !== "4294967295");
 
                 if(idsToFetch.length === 0){
                     return;
                 }
 
                 try {
-
-                    const response = await window.axios.get('/api/v1/nodes/by-ids', {
+                    const response = await window.axios.get("/api/v1/nodes/by-ids", {
                         params: {
                             ids: idsToFetch.join(","),
                         },
                     });
-
-                    for(const node of response.data.nodes){
-                        this.nodesById[node.node_id] = node;
+                    for(const node of response.data?.nodes ?? []){
+                        this.nodesById[String(node.node_id)] = node;
                     }
-
-                } catch(e) {
-                    // do nothing
+                } catch(error) {
+                    console.warn("Node names for messages could not be loaded.", error);
                 }
-
             },
-            async fetchNodeInfo(nodeId) {
-
-                // do nothing if already fetched
-                if(nodeId in this.nodesById){
-                    return;
-                }
-
-                // do nothing if broadcast address
-                if(nodeId.toString() === "4294967295"){
-                    return;
-                }
-
-                try {
-
-                    const response = await window.axios.get(`/api/v1/nodes/${nodeId}`);
-                    const node = response.data.node;
-
-                    if(node){
-                        this.nodesById[node.node_id] = node;
-                    }
-
-                } catch(e) {
-                    // do nothing
-                }
-
-            },
-            scrollToBottom: function() {
+            scrollToBottom() {
                 this.$nextTick(() => {
-                    var container = this.$el.querySelector("#messages");
-                    container.scrollTop = container.scrollHeight;
+                    if(this.$refs.messages){
+                        this.$refs.messages.scrollTop = 0;
+                        this.shouldAutoScroll = true;
+                    }
                 });
             },
             getNodeHexId(nodeId) {
-                return "!" + parseInt(nodeId).toString(16);
+                const parsedNodeId = Number(nodeId);
+                return Number.isFinite(parsedNodeId) ? `!${parsedNodeId.toString(16)}` : "Unknown node";
             },
             getNodeName(nodeId) {
-
-                // find node by id
-                const node = this.nodesById[nodeId];
-                if(!node){
-                    return this.getNodeHexId(nodeId);
-                }
-
-                return `[${node.short_name}] ${node.long_name}`;
-
+                const node = this.nodesById[String(nodeId)];
+                return node ? `[${node.short_name}] ${node.long_name}` : this.getNodeHexId(nodeId);
             },
             getNodeShortName(nodeId) {
-                return this.nodesById[nodeId]?.short_name?.substring(0, 4) ?? "?";
+                return this.nodesById[String(nodeId)]?.short_name?.substring(0, 4) ?? "?";
             },
             getNodeLongName(nodeId) {
-                return this.nodesById[nodeId]?.long_name ?? this.getNodeHexId(nodeId);
+                return this.nodesById[String(nodeId)]?.long_name ?? this.getNodeHexId(nodeId);
             },
             getNodeColour(nodeId) {
-                // convert node id to a hex colour
-                return "#" + (nodeId & 0x00FFFFFF).toString(16).padStart(6, '0');
+                const numericNodeId = Number(nodeId) || 0;
+                return `#${(numericNodeId & 0x00FFFFFF).toString(16).padStart(6, "0")}`;
             },
             getNodeTextColour(nodeId) {
-
-                // extract rgb components
-                const r = (nodeId & 0xFF0000) >> 16;
-                const g = (nodeId & 0x00FF00) >> 8;
-                const b = nodeId & 0x0000FF;
-
-                // calculate brightness
+                const numericNodeId = Number(nodeId) || 0;
+                const r = (numericNodeId & 0xFF0000) >> 16;
+                const g = (numericNodeId & 0x00FF00) >> 8;
+                const b = numericNodeId & 0x0000FF;
                 const brightness = ((r * 0.299) + (g * 0.587) + (b * 0.114)) / 255;
-
-                // determine text color based on brightness
                 return brightness > 0.5 ? "#000000" : "#FFFFFF";
-
-            },
-            escapeMessageText(text) {
-                return text.replaceAll('<', '&lt;')
-                    .replaceAll('>', '&gt;')
-                    .replaceAll('\n', '<br/>');
             },
             formatMessageTimestamp(createdAt) {
-                return moment(new Date(createdAt)).local().format("DD/MMM/YYYY hh:mm:ss A");
+                return window.moment(new Date(createdAt)).local().format("DD MMM YYYY, HH:mm:ss");
             },
         },
         computed: {
             reversedMessages() {
-                // ensure a copy of the array is returned in reverse order
-                return this.messages.map((message) => message).reverse();
+                return [...this.messages].reverse();
             },
             oldestMessageId() {
-
-                if(this.messages.length > 0){
-                    return this.messages[0].id;
-                }
-
-                return null;
-
+                return this.messages[0]?.id ?? null;
             },
             latestMessageId() {
-
-                if(this.messages.length > 0){
-                    return this.messages[this.messages.length - 1].id;
-                }
-
-                return null;
-
-            }
+                return this.messages[this.messages.length - 1]?.id ?? null;
+            },
         },
-    }).mount('#app');
+    }).mount("#app");
 </script>
-
 </body>
 </html>

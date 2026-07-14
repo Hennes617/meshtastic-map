@@ -96,6 +96,26 @@ const optionsList = [
         description: "How many MQTT packets should be processed in parallel.",
     },
     {
+        name: "mqtt-max-message-bytes",
+        type: Number,
+        description: "Maximum accepted MQTT payload size in bytes.",
+    },
+    {
+        name: "mqtt-max-queue-size",
+        type: Number,
+        description: "Maximum number of MQTT messages waiting to be processed. New messages are dropped when full.",
+    },
+    {
+        name: "mqtt-recent-cache-max-entries",
+        type: Number,
+        description: "Maximum entries retained in each in-memory MQTT deduplication cache.",
+    },
+    {
+        name: "mqtt-shutdown-timeout-seconds",
+        type: Number,
+        description: "Maximum time to drain queued work during SIGINT or SIGTERM shutdown.",
+    },
+    {
         name: "allowed-portnums",
         type: Number,
         multiple: true,
@@ -262,19 +282,87 @@ function parseNodeIdFilters(nodeIds) {
     }
 
     const parsedNodeIds = new Set();
+    const invalidNodeIds = [];
     for(const nodeId of nodeIds){
         try {
             parsedNodeIds.add(NodeIdUtil.convertToNumeric(nodeId).toString());
         } catch(err) {
-            console.warn(`Ignoring invalid allowed node id filter: ${nodeId}`);
+            invalidNodeIds.push(nodeId);
         }
     }
 
-    if(parsedNodeIds.size === 0){
-        return null;
+    if(invalidNodeIds.length > 0 || parsedNodeIds.size === 0){
+        throw new Error(
+            `Invalid --allowed-node-ids value(s): ${invalidNodeIds.join(", ") || "none"}. `
+            + "Expected decimal uint32 ids or hex ids like !AABBCCDD.",
+        );
     }
 
     return parsedNodeIds;
+}
+
+function getIntegerOption(parsedOptions, optionName, defaultValue, limits = {}) {
+    const value = parsedOptions[optionName] ?? defaultValue;
+    const {
+        min = Number.MIN_SAFE_INTEGER,
+        max = Number.MAX_SAFE_INTEGER,
+    } = limits;
+
+    if(!Number.isFinite(value) || !Number.isInteger(value) || value < min || value > max){
+        throw new Error(
+            `Invalid --${optionName}: expected an integer between ${min} and ${max}, received ${String(value)}`,
+        );
+    }
+
+    return value;
+}
+
+function getOptionalIntegerOption(parsedOptions, optionName, limits = {}) {
+    if(parsedOptions[optionName] == null){
+        return null;
+    }
+
+    return getIntegerOption(parsedOptions, optionName, null, limits);
+}
+
+function getIntegerListOption(parsedOptions, optionName, limits = {}) {
+    if(parsedOptions[optionName] == null){
+        return null;
+    }
+
+    return parsedOptions[optionName].map((value) => {
+        if(!Number.isFinite(value)
+            || !Number.isInteger(value)
+            || value < limits.min
+            || value > limits.max){
+            throw new Error(
+                `Invalid --${optionName} value ${String(value)}: expected an integer between ${limits.min} and ${limits.max}`,
+            );
+        }
+
+        return value;
+    });
+}
+
+function prepareDecryptionKeys(encodedKeys) {
+    return encodedKeys.map((encodedKey, index) => {
+        if(typeof encodedKey !== "string"
+            || !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(encodedKey)){
+            throw new Error(`Invalid --decryption-keys value at position ${index + 1}: expected canonical base64`);
+        }
+
+        const key = Buffer.from(encodedKey, "base64");
+        if(key.toString("base64") !== encodedKey || (key.length !== 16 && key.length !== 32)){
+            throw new Error(
+                `Invalid --decryption-keys value at position ${index + 1}: decoded key must be 16 or 32 bytes`,
+            );
+        }
+
+        return {
+            algorithm: key.length === 16 ? "aes-128-ctr" : "aes-256-ctr",
+            key: key,
+        };
+    });
 }
 
 // parse command line args
@@ -312,14 +400,96 @@ const identitySourceUrls = [...new Set([
     ...DEFAULT_IDENTITY_SOURCE_URLS,
     ...(options["identity-source-url"] ?? []),
 ])];
-const identitySyncIntervalSeconds = options["identity-sync-interval-seconds"] ?? 21600;
+const MAX_TIMER_SECONDS = Math.floor(0x7FFFFFFF / 1000);
+const MAX_RETENTION_SECONDS = 100 * 365 * 24 * 60 * 60;
+let validatedConfig;
+try {
+    const rawDecryptionKeys = options["decryption-keys"] ?? [
+        "1PG7OiApB1nwvP+rz05pAQ==", // default Meshtastic "AQ==" channel key
+    ];
+    const positiveRetentionLimits = {
+        min: 1,
+        max: MAX_RETENTION_SECONDS,
+    };
+
+    validatedConfig = {
+        allowed_node_ids: parseNodeIdFilters(options["allowed-node-ids"] ?? null),
+        allowed_portnums: getIntegerListOption(options, "allowed-portnums", {
+            min: 0,
+            max: 511,
+        }),
+        decryption_keys: prepareDecryptionKeys(rawDecryptionKeys),
+        drop_portnums_without_bitfield: getIntegerListOption(options, "drop-portnums-without-bitfield", {
+            min: 0,
+            max: 511,
+        }),
+        forget_outdated_node_positions_after_seconds: getOptionalIntegerOption(
+            options,
+            "forget-outdated-node-positions-after-seconds",
+            positiveRetentionLimits,
+        ),
+        identity_sync_interval_seconds: getIntegerOption(options, "identity-sync-interval-seconds", 21600, {
+            min: 0,
+            max: MAX_TIMER_SECONDS,
+        }),
+        mqtt_max_message_bytes: getIntegerOption(options, "mqtt-max-message-bytes", 65536, {
+            min: 256,
+            max: 16 * 1024 * 1024,
+        }),
+        mqtt_max_queue_size: getIntegerOption(options, "mqtt-max-queue-size", 10000, {
+            min: 1,
+            max: 100000,
+        }),
+        mqtt_processing_concurrency: getIntegerOption(options, "mqtt-processing-concurrency", 16, {
+            min: 1,
+            max: 64,
+        }),
+        mqtt_recent_cache_max_entries: getIntegerOption(options, "mqtt-recent-cache-max-entries", 50000, {
+            min: 100,
+            max: 1000000,
+        }),
+        mqtt_shutdown_timeout_seconds: getIntegerOption(options, "mqtt-shutdown-timeout-seconds", 15, {
+            min: 1,
+            max: 300,
+        }),
+        old_firmware_position_precision: getOptionalIntegerOption(options, "old-firmware-position-precision", {
+            min: 1,
+            max: 32,
+        }),
+        purge_interval_seconds: getIntegerOption(options, "purge-interval-seconds", 60, {
+            min: 0,
+            max: MAX_TIMER_SECONDS,
+        }),
+        purge_nodes_unheard_for_seconds: getOptionalIntegerOption(options, "purge-nodes-unheard-for-seconds", positiveRetentionLimits),
+        purge_device_metrics_after_seconds: getOptionalIntegerOption(options, "purge-device-metrics-after-seconds", positiveRetentionLimits),
+        purge_environment_metrics_after_seconds: getOptionalIntegerOption(options, "purge-environment-metrics-after-seconds", positiveRetentionLimits),
+        purge_map_reports_after_seconds: getOptionalIntegerOption(options, "purge-map-reports-after-seconds", positiveRetentionLimits),
+        purge_neighbour_infos_after_seconds: getOptionalIntegerOption(options, "purge-neighbour-infos-after-seconds", positiveRetentionLimits),
+        purge_power_metrics_after_seconds: getOptionalIntegerOption(options, "purge-power-metrics-after-seconds", positiveRetentionLimits),
+        purge_positions_after_seconds: getOptionalIntegerOption(options, "purge-positions-after-seconds", positiveRetentionLimits),
+        purge_service_envelopes_after_seconds: getOptionalIntegerOption(options, "purge-service-envelopes-after-seconds", positiveRetentionLimits),
+        purge_text_messages_after_seconds: getOptionalIntegerOption(options, "purge-text-messages-after-seconds", positiveRetentionLimits),
+        purge_traceroutes_after_seconds: getOptionalIntegerOption(options, "purge-traceroutes-after-seconds", positiveRetentionLimits),
+        purge_waypoints_after_seconds: getOptionalIntegerOption(options, "purge-waypoints-after-seconds", positiveRetentionLimits),
+    };
+} catch(err) {
+    console.error(`ERROR: ${err.message}`);
+    process.exitCode = 1;
+    return;
+}
+
+const identitySyncIntervalSeconds = validatedConfig.identity_sync_interval_seconds;
 const hasIdentityFailsafeSource = Boolean(identityNameFailsafeUrl);
 const hasExternalIdentitySources = identitySourceUrls.length > 0;
 const hasSeparateIdentityFailsafeSource = hasIdentityFailsafeSource && !identitySourceUrls.includes(identityNameFailsafeUrl);
 const hasIdentitySyncSources = hasExternalIdentitySources || hasSeparateIdentityFailsafeSource;
-const allowedNodeIds = parseNodeIdFilters(options["allowed-node-ids"] ?? null);
-const mqttProcessingConcurrency = Math.max(1, options["mqtt-processing-concurrency"] ?? 16);
-const allowedPortnums = options["allowed-portnums"] ?? null;
+const allowedNodeIds = validatedConfig.allowed_node_ids;
+const mqttProcessingConcurrency = validatedConfig.mqtt_processing_concurrency;
+const mqttMaxMessageBytes = validatedConfig.mqtt_max_message_bytes;
+const mqttMaxQueueSize = validatedConfig.mqtt_max_queue_size;
+const mqttRecentCacheMaxEntries = validatedConfig.mqtt_recent_cache_max_entries;
+const mqttShutdownTimeoutSeconds = validatedConfig.mqtt_shutdown_timeout_seconds;
+const allowedPortnums = validatedConfig.allowed_portnums;
 const logUnknownPortnums = options["log-unknown-portnums"] ?? false;
 const collectServiceEnvelopes = options["collect-service-envelopes"] ?? false;
 const collectPositions = options["collect-positions"] ?? false;
@@ -328,25 +498,23 @@ const ignoreDirectMessages = options["ignore-direct-messages"] ?? false;
 const collectWaypoints = options["collect-waypoints"] ?? false;
 const collectNeighbourInfo = options["collect-neighbour-info"] ?? false;
 const collectMapReports = options["collect-map-reports"] ?? false;
-const decryptionKeys = options["decryption-keys"] ?? [
-    "1PG7OiApB1nwvP+rz05pAQ==", // add default "AQ==" decryption key
-];
+const preparedDecryptionKeys = validatedConfig.decryption_keys;
 const dropPacketsNotOkToMqtt = options["drop-packets-not-ok-to-mqtt"] ?? false;
-const dropPortnumsWithoutBitfield = options["drop-portnums-without-bitfield"] ?? null;
-const oldFirmwarePositionPrecision = options["old-firmware-position-precision"] ?? null;
-const forgetOutdatedNodePositionsAfterSeconds = options["forget-outdated-node-positions-after-seconds"] ?? null;
-const purgeIntervalSeconds = options["purge-interval-seconds"] ?? 60;
-const purgeNodesUnheardForSeconds = options["purge-nodes-unheard-for-seconds"] ?? null;
-const purgeDeviceMetricsAfterSeconds = options["purge-device-metrics-after-seconds"] ?? null;
-const purgeEnvironmentMetricsAfterSeconds = options["purge-environment-metrics-after-seconds"] ?? null;
-const purgeMapReportsAfterSeconds = options["purge-map-reports-after-seconds"] ?? null;
-const purgeNeighbourInfosAfterSeconds = options["purge-neighbour-infos-after-seconds"] ?? null;
-const purgePowerMetricsAfterSeconds = options["purge-power-metrics-after-seconds"] ?? null;
-const purgePositionsAfterSeconds = options["purge-positions-after-seconds"] ?? null;
-const purgeServiceEnvelopesAfterSeconds = options["purge-service-envelopes-after-seconds"] ?? null;
-const purgeTextMessagesAfterSeconds = options["purge-text-messages-after-seconds"] ?? null;
-const purgeTraceroutesAfterSeconds = options["purge-traceroutes-after-seconds"] ?? null;
-const purgeWaypointsAfterSeconds = options["purge-waypoints-after-seconds"] ?? null;
+const dropPortnumsWithoutBitfield = validatedConfig.drop_portnums_without_bitfield;
+const oldFirmwarePositionPrecision = validatedConfig.old_firmware_position_precision;
+const forgetOutdatedNodePositionsAfterSeconds = validatedConfig.forget_outdated_node_positions_after_seconds;
+const purgeIntervalSeconds = validatedConfig.purge_interval_seconds;
+const purgeNodesUnheardForSeconds = validatedConfig.purge_nodes_unheard_for_seconds;
+const purgeDeviceMetricsAfterSeconds = validatedConfig.purge_device_metrics_after_seconds;
+const purgeEnvironmentMetricsAfterSeconds = validatedConfig.purge_environment_metrics_after_seconds;
+const purgeMapReportsAfterSeconds = validatedConfig.purge_map_reports_after_seconds;
+const purgeNeighbourInfosAfterSeconds = validatedConfig.purge_neighbour_infos_after_seconds;
+const purgePowerMetricsAfterSeconds = validatedConfig.purge_power_metrics_after_seconds;
+const purgePositionsAfterSeconds = validatedConfig.purge_positions_after_seconds;
+const purgeServiceEnvelopesAfterSeconds = validatedConfig.purge_service_envelopes_after_seconds;
+const purgeTextMessagesAfterSeconds = validatedConfig.purge_text_messages_after_seconds;
+const purgeTraceroutesAfterSeconds = validatedConfig.purge_traceroutes_after_seconds;
+const purgeWaypointsAfterSeconds = validatedConfig.purge_waypoints_after_seconds;
 
 const MQTT_GATEWAY_HEARTBEAT_WRITE_INTERVAL_MS = 10000;
 const POSITION_WRITE_DEDUPE_WINDOW_MS = 60000;
@@ -359,7 +527,11 @@ const NODE_TELEMETRY_UPDATE_WINDOW_MS = 15000;
 const NODE_NEIGHBOURS_UPDATE_WINDOW_MS = 15000;
 const MQTT_MESSAGE_DEDUPE_WINDOW_MS = 30000;
 const MQTT_MESSAGE_PROCESSING_CONCURRENCY = mqttProcessingConcurrency;
-const MQTT_MESSAGE_QUEUE_WARNING_THRESHOLD = 5000;
+const MQTT_MESSAGE_QUEUE_WARNING_THRESHOLD = Math.max(1, Math.min(5000, Math.floor(mqttMaxQueueSize * 0.8)));
+const MQTT_MAX_MESSAGE_BYTES = mqttMaxMessageBytes;
+const MQTT_MAX_QUEUE_SIZE = mqttMaxQueueSize;
+const RECENT_CACHE_MAX_ENTRIES = mqttRecentCacheMaxEntries;
+const MQTT_SHUTDOWN_TIMEOUT_MS = mqttShutdownTimeoutSeconds * 1000;
 const MQTT_PACKET_TOPIC_REGEX = /^msh(?:\/[^/]+)+\/2\/(?:e\/[^/]+\/![0-9a-f]+|map\/)$/i;
 const IDENTITY_WARMUP_SYNC_DELAY_MS = 60000;
 const IDENTITY_EXPEDITED_SYNC_DELAY_MS = 30000;
@@ -378,10 +550,21 @@ const recentNodeTelemetryUpdates = new Map();
 const recentNodeNeighbourUpdates = new Map();
 const recentMqttMessages = new Map();
 const recentNodeIdentityHydrationAttempts = new Map();
+const activeTargetedIdentityHydrations = new Set();
 
 const mqttMessageQueue = [];
 let activeMqttMessageProcessors = 0;
 let mqttQueueWarningShown = false;
+let acceptingMqttMessages = true;
+let isShuttingDown = false;
+let shutdownPromise = null;
+let mqttMessagesDroppedQueueFull = 0;
+let mqttMessagesDroppedOversized = 0;
+let mqttMessagesDroppedDuringShutdown = 0;
+let lastMqttDropWarningAt = 0;
+let purgeInterval = null;
+let identitySyncInterval = null;
+let purgeInFlight = false;
 let targetedIdentitySourceNodesByIdCache = null;
 let targetedIdentitySourceNodesByIdCacheFetchedAt = 0;
 let targetedIdentitySourceNodesByIdCachePromise = null;
@@ -480,16 +663,16 @@ function buildMapReportNodeData(mapReport, nodeId) {
         data.role = mapReport.role;
     }
 
-    if(hasOwnField(mapReport, "latitudeI")){
+    const hasValidMapCoordinates = hasOwnField(mapReport, "latitudeI")
+        && hasOwnField(mapReport, "longitudeI")
+        && PositionUtil.hasValidCoordinates(mapReport.latitudeI, mapReport.longitudeI);
+    if(hasValidMapCoordinates){
         data.latitude = mapReport.latitudeI;
-    }
-
-    if(hasOwnField(mapReport, "longitudeI")){
         data.longitude = mapReport.longitudeI;
     }
 
-    if(hasOwnField(mapReport, "altitude")){
-        data.altitude = mapReport.altitude !== 0 ? mapReport.altitude : null;
+    if(hasOwnField(mapReport, "altitude") && Number.isInteger(mapReport.altitude)){
+        data.altitude = mapReport.altitude;
     }
 
     const firmwareVersion = getMeaningfulString(mapReport.firmwareVersion);
@@ -510,7 +693,10 @@ function buildMapReportNodeData(mapReport, nodeId) {
     }
 
     if(hasOwnField(mapReport, "positionPrecision")){
-        data.position_precision = mapReport.positionPrecision;
+        const normalizedPositionPrecision = PositionUtil.normalizePacketPrecision(mapReport.positionPrecision);
+        if(normalizedPositionPrecision != null){
+            data.position_precision = normalizedPositionPrecision;
+        }
     }
 
     if(hasOwnField(mapReport, "numOnlineLocalNodes")){
@@ -533,6 +719,18 @@ function isRecentlySeen(cache, key, ttlMs) {
     const expiresAt = cache.get(key);
     if(expiresAt != null && expiresAt > now){
         return true;
+    }
+
+    if(expiresAt != null){
+        cache.delete(key);
+    }
+
+    while(cache.size >= RECENT_CACHE_MAX_ENTRIES){
+        const oldestKey = cache.keys().next().value;
+        if(oldestKey == null){
+            break;
+        }
+        cache.delete(oldestKey);
     }
 
     cache.set(key, now + ttlMs);
@@ -571,7 +769,10 @@ function shouldProcessMqttTopic(topic) {
 }
 
 function shouldAcceptSender(nodeId) {
-    if(nodeId == null || nodeId === 0){
+    let normalizedNodeId;
+    try {
+        normalizedNodeId = NodeIdUtil.convertToNumeric(nodeId).toString();
+    } catch(err) {
         return false;
     }
 
@@ -579,7 +780,7 @@ function shouldAcceptSender(nodeId) {
         return true;
     }
 
-    return allowedNodeIds.has(nodeId.toString());
+    return allowedNodeIds.has(normalizedNodeId);
 }
 
 function scheduleMqttMessageProcessing() {
@@ -790,15 +991,18 @@ async function hydrateNodeIdentityFromPrimarySource(nodeId, reason, options = {}
 }
 
 function triggerNodeIdentityHydration(nodeId, reason, options = {}) {
-    const sourceUrl = getPrimaryIdentitySourceUrl();
-    if(nodeId == null || sourceUrl == null){
+    if(isShuttingDown || nodeId == null || getTargetedIdentitySourceUrls().length === 0){
         return;
     }
 
-    hydrateNodeIdentityFromPrimarySource(nodeId, reason, options)
+    const hydrationTask = hydrateNodeIdentityFromPrimarySource(nodeId, reason, options)
         .catch((err) => {
             console.warn(`Targeted node identity hydration failed for ${nodeId.toString()} (${reason}): ${err.message}`);
+        })
+        .finally(() => {
+            activeTargetedIdentityHydrations.delete(hydrationTask);
         });
+    activeTargetedIdentityHydrations.add(hydrationTask);
 }
 
 async function ensureNodeExists(nodeId) {
@@ -819,7 +1023,10 @@ async function ensureNodeExists(nodeId) {
         triggerNodeIdentityHydration(nodeId, "blank-node-created");
         scheduleIdentitySync("blank-node-created");
     } catch(err) {
-        // ignore races where another packet creates the same node concurrently
+        if(err?.code !== "P2002"){
+            throw err;
+        }
+        // Ignore the expected race where another packet creates the same node concurrently.
     }
 }
 
@@ -840,7 +1047,7 @@ function scheduleIdentitySync(reason, delayMs = IDENTITY_EXPEDITED_SYNC_DELAY_MS
         ignoreRecentSyncCooldown = false,
     } = options;
 
-    if(!hasIdentitySyncSources || pendingIdentitySyncTimeout != null){
+    if(isShuttingDown || !hasIdentitySyncSources || pendingIdentitySyncTimeout != null){
         return;
     }
 
@@ -886,7 +1093,7 @@ async function countNodesMissingFixedNames() {
 }
 
 async function syncExternalNodeIdentities() {
-    if(identitySyncInFlight || !hasIdentitySyncSources){
+    if(isShuttingDown || identitySyncInFlight || !hasIdentitySyncSources){
         return;
     }
 
@@ -895,6 +1102,10 @@ async function syncExternalNodeIdentities() {
 
     try {
         for(const identitySourceUrl of identitySourceUrls){
+            if(isShuttingDown){
+                break;
+            }
+
             try {
                 const result = await importNodeIdentitiesFromUrl(prisma, identitySourceUrl);
                 console.log("External node identity sync completed", {
@@ -907,7 +1118,7 @@ async function syncExternalNodeIdentities() {
             }
         }
 
-        if(hasSeparateIdentityFailsafeSource){
+        if(!isShuttingDown && hasSeparateIdentityFailsafeSource){
             const nodesMissingIdentityFields = await countNodesMissingFixedNames();
             if(nodesMissingIdentityFields > 0){
                 try {
@@ -946,6 +1157,7 @@ if(!fs.existsSync(path.join(protobufsPath, "meshtastic/mqtt.proto"))){
         "To use the MQTT Collector, please clone the Meshtastic protobufs into src/external/protobufs",
         "git clone https://github.com/meshtastic/protobufs src/external/protobufs",
     ].join("\n"));
+    process.exitCode = 1;
     return;
 }
 
@@ -967,6 +1179,11 @@ console.log("Starting MQTT collector", {
     identity_sync_has_external_sources: hasExternalIdentitySources,
     identity_sync_has_failsafe_source: hasSeparateIdentityFailsafeSource,
     allowed_node_ids_count: allowedNodeIds?.size ?? 0,
+    mqtt_processing_concurrency: MQTT_MESSAGE_PROCESSING_CONCURRENCY,
+    mqtt_max_message_bytes: MQTT_MAX_MESSAGE_BYTES,
+    mqtt_max_queue_size: MQTT_MAX_QUEUE_SIZE,
+    mqtt_recent_cache_max_entries: RECENT_CACHE_MAX_ENTRIES,
+    mqtt_shutdown_timeout_seconds: mqttShutdownTimeoutSeconds,
     protobufs_path: protobufsPath,
 });
 
@@ -986,7 +1203,20 @@ const Waypoint = root.lookupType("Waypoint");
 
 // run automatic purge if configured
 if(purgeIntervalSeconds){
-    setInterval(async () => {
+    purgeInterval = setInterval(() => {
+        runAutomaticPurge().catch((err) => {
+            console.error("Automatic database purge failed:", err);
+        });
+    }, purgeIntervalSeconds * 1000);
+}
+
+async function runAutomaticPurge() {
+    if(isShuttingDown || purgeInFlight){
+        return;
+    }
+
+    purgeInFlight = true;
+    try {
         await purgeUnheardNodes();
         await purgeOldDeviceMetrics();
         await purgeOldEnvironmentMetrics();
@@ -999,7 +1229,9 @@ if(purgeIntervalSeconds){
         await purgeOldTraceroutes();
         await purgeOldWaypoints();
         await forgetOutdatedNodePositions();
-    }, purgeIntervalSeconds * 1000);
+    } finally {
+        purgeInFlight = false;
+    }
 }
 
 if(identitySyncIntervalSeconds > 0 && hasIdentitySyncSources){
@@ -1011,7 +1243,7 @@ if(identitySyncIntervalSeconds > 0 && hasIdentitySyncSources){
         ignoreRecentSyncCooldown: true,
     });
 
-    const identitySyncInterval = setInterval(() => {
+    identitySyncInterval = setInterval(() => {
         syncExternalNodeIdentities().catch((err) => {
             console.warn(`Scheduled external node identity sync failed: ${err.message}`);
         });
@@ -1373,31 +1605,18 @@ function createNonce(packetId, fromNode) {
  * https://github.com/pdxlocations/Meshtastic-MQTT-Connect/blob/main/meshtastic-mqtt-connect.py#L381
  */
 function decrypt(packet) {
+    let nonceBuffer;
+    try {
+        nonceBuffer = createNonce(packet.id, packet.from);
+    } catch(err) {
+        return null;
+    }
 
     // attempt to decrypt with all available decryption keys
-    for(const decryptionKey of decryptionKeys){
+    for(const preparedKey of preparedDecryptionKeys){
         try {
-
-            // convert encryption key to buffer
-            const key = Buffer.from(decryptionKey, "base64");
-
-            // create decryption iv/nonce for this packet
-            const nonceBuffer = createNonce(packet.id, packet.from);
-
-            // determine algorithm based on key length
-            var algorithm = null;
-            if(key.length === 16){
-                algorithm = "aes-128-ctr";
-            } else if(key.length === 32){
-                algorithm = "aes-256-ctr";
-            } else {
-                // skip this key, try the next one...
-                console.error(`Skipping decryption key with invalid length: ${key.length}`);
-                continue;
-            }
-
             // create decipher
-            const decipher = crypto.createDecipheriv(algorithm, key, nonceBuffer);
+            const decipher = crypto.createDecipheriv(preparedKey.algorithm, preparedKey.key, nonceBuffer);
 
             // decrypt encrypted packet
             const decryptedBuffer = Buffer.concat([decipher.update(packet.encrypted), decipher.final()]);
@@ -1419,7 +1638,7 @@ function decrypt(packet) {
  * @returns {bigint} the node id in numeric form
  */
 function convertHexIdToNumericId(hexId) {
-    return BigInt('0x' + hexId.replaceAll("!", ""));
+    return NodeIdUtil.convertToNumeric(hexId);
 }
 
 // subscribe to everything when connected
@@ -1611,6 +1830,20 @@ async function processMqttMessage(topic, message) {
         else if(portnum === 3) {
 
             const position = Position.decode(envelope.packet.decoded.payload);
+            const hasCoordinates = hasOwnField(position, "latitudeI")
+                && hasOwnField(position, "longitudeI");
+            let hasValidCoordinates = hasCoordinates
+                && PositionUtil.hasValidCoordinates(position.latitudeI, position.longitudeI);
+            const hasPositionPrecision = hasOwnField(position, "precisionBits");
+            let positionPrecision = hasPositionPrecision
+                ? PositionUtil.normalizePacketPrecision(position.precisionBits)
+                : null;
+            if(hasPositionPrecision && positionPrecision == null){
+                hasValidCoordinates = false;
+            }
+            const positionAltitude = hasOwnField(position, "altitude") && Number.isInteger(position.altitude)
+                ? position.altitude
+                : null;
 
             if(logKnownPacketTypes){
                 console.log("POSITION_APP", {
@@ -1620,7 +1853,7 @@ async function processMqttMessage(topic, message) {
             }
 
             // process position
-            if(position.latitudeI != null && position.longitudeI){
+            if(hasValidCoordinates){
 
                 // if bitfield is not available, we are on firmware v2.4 or below
                 // if configured, position packets should have their precision reduced
@@ -1632,6 +1865,7 @@ async function processMqttMessage(topic, message) {
 
                     // update position precision on packet to show that it is no longer full precision
                     position.precisionBits = oldFirmwarePositionPrecision;
+                    positionPrecision = oldFirmwarePositionPrecision;
 
                 }
 
@@ -1641,8 +1875,8 @@ async function processMqttMessage(topic, message) {
                         envelope.packet.from,
                         position.latitudeI,
                         position.longitudeI,
-                        position.altitude !== 0 ? position.altitude : "",
-                        position.precisionBits ?? "",
+                        positionAltitude ?? "",
+                        positionPrecision ?? "",
                     ].join(":");
 
                     if(!isRecentlySeen(recentNodePositionUpdates, nodePositionUpdateKey, NODE_POSITION_UPDATE_WINDOW_MS)){
@@ -1655,8 +1889,8 @@ async function processMqttMessage(topic, message) {
                                 position_updated_at: new Date(),
                                 latitude: position.latitudeI,
                                 longitude: position.longitudeI,
-                                altitude: position.altitude !== 0 ? position.altitude : null,
-                                position_precision: position.precisionBits,
+                                altitude: positionAltitude,
+                                position_precision: positionPrecision,
                             },
                         });
                     }
@@ -1664,6 +1898,10 @@ async function processMqttMessage(topic, message) {
                     console.error(e);
                 }
 
+            }
+
+            if(!hasValidCoordinates){
+                return;
             }
 
             // don't collect position history if not enabled, but we still want to update the node above
@@ -1685,7 +1923,7 @@ async function processMqttMessage(topic, message) {
                             gateway_id: gatewayNodeId,
                             latitude: position.latitudeI,
                             longitude: position.longitudeI,
-                            altitude: position.altitude,
+                            altitude: positionAltitude,
                         },
                     });
                 }
@@ -2014,6 +2252,7 @@ async function processMqttMessage(topic, message) {
         else if(portnum === 73) {
 
             const mapReport = MapReport.decode(envelope.packet.decoded.payload);
+            const mapReportNodeData = buildMapReportNodeData(mapReport, envelope.packet.from);
 
             if(logKnownPacketTypes) {
                 console.log("MAP_REPORT_APP", {
@@ -2024,7 +2263,7 @@ async function processMqttMessage(topic, message) {
 
             // create or update node in db
             try {
-                await updateNodeFields(envelope.packet.from, buildMapReportNodeData(mapReport, envelope.packet.from));
+                await updateNodeFields(envelope.packet.from, mapReportNodeData);
             } catch (e) {
                 console.error(e);
             }
@@ -2039,8 +2278,17 @@ async function processMqttMessage(topic, message) {
                     envelope.packet.from,
                     mapReport.longName,
                     mapReport.shortName,
+                    mapReport.role,
+                    mapReport.hwModel,
+                    mapReport.firmwareVersion,
+                    mapReport.region,
+                    mapReport.modemPreset,
+                    mapReport.hasDefaultChannel,
                     mapReport.latitudeI,
                     mapReport.longitudeI,
+                    mapReport.altitude,
+                    mapReportNodeData.position_precision,
+                    mapReport.numOnlineLocalNodes,
                 ].join(":");
 
                 if(!isRecentlySeen(recentMapReportWrites, mapReportWriteKey, MAP_REPORT_WRITE_DEDUPE_WINDOW_MS)){
@@ -2055,10 +2303,10 @@ async function processMqttMessage(topic, message) {
                             region: mapReport.region,
                             modem_preset: mapReport.modemPreset,
                             has_default_channel: mapReport.hasDefaultChannel,
-                            latitude: mapReport.latitudeI,
-                            longitude: mapReport.longitudeI,
-                            altitude: mapReport.altitude,
-                            position_precision: mapReport.positionPrecision,
+                            latitude: mapReportNodeData.latitude ?? null,
+                            longitude: mapReportNodeData.longitude ?? null,
+                            altitude: mapReportNodeData.altitude ?? null,
+                            position_precision: mapReportNodeData.position_precision ?? null,
                             num_online_local_nodes: mapReport.numOnlineLocalNodes,
                         },
                     });
@@ -2098,8 +2346,44 @@ async function processMqttMessage(topic, message) {
     }
 }
 
-client.on("message", (topic, message) => {
-    if(!shouldProcessMqttTopic(topic)){
+function logMqttMessageDrop(reason, topic, messageBytes) {
+    const now = Date.now();
+    const totalDropped = mqttMessagesDroppedQueueFull
+        + mqttMessagesDroppedOversized
+        + mqttMessagesDroppedDuringShutdown;
+    if(totalDropped !== 1 && now - lastMqttDropWarningAt < 30000){
+        return;
+    }
+
+    lastMqttDropWarningAt = now;
+    console.warn("Dropped MQTT message", {
+        reason: reason,
+        topic: topic,
+        message_bytes: messageBytes,
+        queue_length: mqttMessageQueue.length,
+        dropped_queue_full: mqttMessagesDroppedQueueFull,
+        dropped_oversized: mqttMessagesDroppedOversized,
+        dropped_during_shutdown: mqttMessagesDroppedDuringShutdown,
+    });
+}
+
+function handleMqttMessage(topic, message) {
+    if(!acceptingMqttMessages || !shouldProcessMqttTopic(topic)){
+        return;
+    }
+
+    if(message.length > MQTT_MAX_MESSAGE_BYTES){
+        mqttMessagesDroppedOversized += 1;
+        logMqttMessageDrop("message-too-large", topic, message.length);
+        return;
+    }
+
+    // Drop the newest incoming packet when the bounded queue is full. Existing queued
+    // work keeps FIFO order, and this packet is not placed in the dedupe cache so a
+    // later broker redelivery can still be accepted once capacity is available.
+    if(mqttMessageQueue.length >= MQTT_MAX_QUEUE_SIZE){
+        mqttMessagesDroppedQueueFull += 1;
+        logMqttMessageDrop("queue-full-drop-newest", topic, message.length);
         return;
     }
 
@@ -2117,10 +2401,150 @@ client.on("message", (topic, message) => {
         message: Buffer.from(message),
     });
 
+    scheduleMqttMessageProcessing();
+
+    // Only warn about messages that remain queued after all available workers have
+    // been filled. A small configured queue must not warn for every normal packet.
     if(mqttMessageQueue.length >= MQTT_MESSAGE_QUEUE_WARNING_THRESHOLD && !mqttQueueWarningShown){
         mqttQueueWarningShown = true;
         console.warn(`MQTT message queue length is ${mqttMessageQueue.length}. Collector is under heavy load.`);
     }
+}
 
+client.on("message", handleMqttMessage);
+
+function delay(milliseconds) {
+    return new Promise((resolve) => {
+        setTimeout(resolve, milliseconds);
+    });
+}
+
+async function waitForCollectorWorkToDrain(deadline) {
     scheduleMqttMessageProcessing();
-});
+    while(Date.now() < deadline){
+        if(mqttMessageQueue.length === 0
+            && activeMqttMessageProcessors === 0
+            && !identitySyncInFlight
+            && activeTargetedIdentityHydrations.size === 0
+            && !purgeInFlight){
+            return true;
+        }
+
+        await delay(Math.min(50, Math.max(1, deadline - Date.now())));
+    }
+
+    return mqttMessageQueue.length === 0
+        && activeMqttMessageProcessors === 0
+        && !identitySyncInFlight
+        && activeTargetedIdentityHydrations.size === 0
+        && !purgeInFlight;
+}
+
+function endMqttClient(timeoutMs) {
+    return new Promise((resolve) => {
+        let settled = false;
+        const finish = () => {
+            if(settled){
+                return;
+            }
+            settled = true;
+            clearTimeout(timeout);
+            resolve();
+        };
+        const timeout = setTimeout(() => {
+            try {
+                client.end(true);
+            } catch(err) {
+                // The client may already have completed its shutdown.
+            }
+            finish();
+        }, Math.max(1, timeoutMs));
+
+        try {
+            client.end(false, {}, finish);
+        } catch(err) {
+            finish();
+        }
+    });
+}
+
+function shutdownCollector(signal) {
+    if(shutdownPromise != null){
+        return shutdownPromise;
+    }
+
+    shutdownPromise = (async () => {
+        const startedAt = Date.now();
+        const drainDeadline = startedAt + MQTT_SHUTDOWN_TIMEOUT_MS;
+        isShuttingDown = true;
+        acceptingMqttMessages = false;
+        client.removeListener("message", handleMqttMessage);
+
+        clearInterval(recentWriteCacheCleanupInterval);
+        if(purgeInterval != null){
+            clearInterval(purgeInterval);
+            purgeInterval = null;
+        }
+        if(identitySyncInterval != null){
+            clearInterval(identitySyncInterval);
+            identitySyncInterval = null;
+        }
+        if(pendingIdentitySyncTimeout != null){
+            clearTimeout(pendingIdentitySyncTimeout);
+            pendingIdentitySyncTimeout = null;
+        }
+
+        console.log(`Received ${signal}; draining MQTT work before shutdown`, {
+            queue_length: mqttMessageQueue.length,
+            active_processors: activeMqttMessageProcessors,
+            timeout_ms: MQTT_SHUTDOWN_TIMEOUT_MS,
+        });
+
+        const hardShutdownTimer = setTimeout(() => {
+            console.error("Collector shutdown deadline exceeded; forcing process exit");
+            process.exit(1);
+        }, MQTT_SHUTDOWN_TIMEOUT_MS + 5000);
+        if(typeof hardShutdownTimer.unref === "function"){
+            hardShutdownTimer.unref();
+        }
+
+        const drained = await waitForCollectorWorkToDrain(drainDeadline);
+        if(!drained && mqttMessageQueue.length > 0){
+            mqttMessagesDroppedDuringShutdown += mqttMessageQueue.length;
+            mqttMessageQueue.length = 0;
+            logMqttMessageDrop("shutdown-drain-timeout", null, null);
+        }
+
+        const remainingShutdownMs = Math.max(1, drainDeadline - Date.now());
+        await endMqttClient(Math.min(5000, remainingShutdownMs));
+
+        try {
+            await prisma.$disconnect();
+        } catch(err) {
+            console.error("Failed to disconnect Prisma during shutdown:", err);
+            process.exitCode = 1;
+        }
+
+        if(drained){
+            clearTimeout(hardShutdownTimer);
+        }
+
+        console.log("MQTT collector stopped", {
+            drained: drained,
+            dropped_queue_full: mqttMessagesDroppedQueueFull,
+            dropped_oversized: mqttMessagesDroppedOversized,
+            dropped_during_shutdown: mqttMessagesDroppedDuringShutdown,
+        });
+    })();
+
+    return shutdownPromise;
+}
+
+for(const signal of ["SIGINT", "SIGTERM"]){
+    process.on(signal, () => {
+        shutdownCollector(signal).catch((err) => {
+            console.error("MQTT collector shutdown failed:", err);
+            process.exitCode = 1;
+        });
+    });
+}

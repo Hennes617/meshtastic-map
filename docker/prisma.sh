@@ -4,9 +4,6 @@ set -eu
 
 MODE="${1:-apply}"
 
-echo "Generating Prisma client"
-npx prisma generate
-
 case "$MODE" in
   apply)
     echo "Syncing Prisma schema with db push"
