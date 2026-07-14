@@ -3,6 +3,7 @@ const NodeIdUtil = require("./node_id_util");
 const { getHardwareModelIdsByName } = require("./hardware_models");
 
 const hardwareModelIdsByName = getHardwareModelIdsByName();
+const DEFAULT_MAX_RESPONSE_BYTES = 5 * 1024 * 1024;
 
 function getMeaningfulString(value) {
     if(typeof value !== "string"){
@@ -92,10 +93,21 @@ function getImportedNodeId(sourceNode) {
 }
 
 function getImportedShortName(sourceNode, nodeId) {
-    return getMeaningfulShortName(
-        sourceNode?.raw_short_name ?? sourceNode?.short_name ?? sourceNode?.shortName,
-        nodeId,
-    );
+    const candidates = [
+        sourceNode?.raw_short_name,
+        sourceNode?.rawShortName,
+        sourceNode?.short_name,
+        sourceNode?.shortName,
+    ];
+
+    for(const candidate of candidates){
+        const shortName = getMeaningfulShortName(candidate, nodeId);
+        if(shortName != null){
+            return shortName;
+        }
+    }
+
+    return null;
 }
 
 function getMeaningfulShortName(value, nodeId) {
@@ -165,9 +177,9 @@ function getImportedNodesFromPayload(payload) {
             })
             .map(([nodeId, value]) => {
                 return {
+                    ...value,
                     id: value.id ?? nodeId,
                     node_id: value.node_id ?? value.nodeId ?? nodeId,
-                    ...value,
                 };
             });
 
@@ -345,19 +357,62 @@ async function importNodeIdentitiesFromFile(prisma, filePath, options = {}) {
 
 async function fetchNodeIdentitiesPayloadFromUrl(url, options = {}) {
     const timeoutMs = options.timeout_ms ?? 15000;
+    const maxResponseBytes = options.max_response_bytes ?? DEFAULT_MAX_RESPONSE_BYTES;
+    if(!Number.isInteger(timeoutMs) || timeoutMs <= 0){
+        throw new RangeError("Identity request timeout must be a positive integer");
+    }
+    if(!Number.isInteger(maxResponseBytes) || maxResponseBytes <= 0){
+        throw new RangeError("Identity response size limit must be a positive integer");
+    }
+
     const abortController = new AbortController();
     const timeout = setTimeout(() => {
         abortController.abort();
     }, timeoutMs);
-    let response;
+
     try {
-        response = await fetch(url, {
+        const response = await fetch(url, {
             headers: {
                 "accept": "application/json",
                 "user-agent": "meshtastic-map/1.0",
             },
             signal: abortController.signal,
         });
+
+        if(!response.ok){
+            throw new Error(`Request failed with status ${response.status} ${response.statusText}`);
+        }
+
+        const contentLength = Number.parseInt(response.headers.get("content-length") ?? "", 10);
+        if(Number.isFinite(contentLength) && contentLength > maxResponseBytes){
+            await response.body?.cancel("response-too-large");
+            throw new Error(`Identity response exceeds ${maxResponseBytes} byte limit`);
+        }
+
+        if(response.body == null){
+            throw new Error("Identity response did not contain a body");
+        }
+
+        const reader = response.body.getReader();
+        const chunks = [];
+        let totalBytes = 0;
+        while(true){
+            const { done, value } = await reader.read();
+            if(done){
+                break;
+            }
+
+            totalBytes += value.byteLength;
+            if(totalBytes > maxResponseBytes){
+                await reader.cancel("response-too-large");
+                throw new Error(`Identity response exceeds ${maxResponseBytes} byte limit`);
+            }
+
+            chunks.push(Buffer.from(value));
+        }
+
+        const responseBody = Buffer.concat(chunks, totalBytes).toString("utf-8").replace(/^\uFEFF/, "");
+        return JSON.parse(responseBody);
     } catch(err) {
         if(err?.name === "AbortError"){
             throw new Error(`Request timed out after ${timeoutMs}ms`);
@@ -367,12 +422,6 @@ async function fetchNodeIdentitiesPayloadFromUrl(url, options = {}) {
     } finally {
         clearTimeout(timeout);
     }
-
-    if(!response.ok){
-        throw new Error(`Request failed with status ${response.status} ${response.statusText}`);
-    }
-
-    return response.json();
 }
 
 async function importNodeIdentitiesFromUrl(prisma, url, options = {}) {

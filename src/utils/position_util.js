@@ -1,11 +1,57 @@
 class PositionUtil {
 
+    static MIN_LATITUDE_INTEGER = -900000000;
+    static MAX_LATITUDE_INTEGER = 900000000;
+    static MIN_LONGITUDE_INTEGER = -1800000000;
+    static MAX_LONGITUDE_INTEGER = 1800000000;
+
+    static isValidLatitude(latitudeInteger) {
+        return Number.isInteger(latitudeInteger)
+            && latitudeInteger >= PositionUtil.MIN_LATITUDE_INTEGER
+            && latitudeInteger <= PositionUtil.MAX_LATITUDE_INTEGER;
+    }
+
+    static isValidLongitude(longitudeInteger) {
+        return Number.isInteger(longitudeInteger)
+            && longitudeInteger >= PositionUtil.MIN_LONGITUDE_INTEGER
+            && longitudeInteger <= PositionUtil.MAX_LONGITUDE_INTEGER;
+    }
+
+    static isValidPrecision(precision) {
+        return Number.isInteger(precision) && precision >= 1 && precision <= 32;
+    }
+
+    static normalizePacketPrecision(precision) {
+        // Meshtastic packets in the wild use an explicit zero for full/unspecified
+        // precision. Store that as the canonical full-precision value.
+        if(precision === 0){
+            return 32;
+        }
+
+        return PositionUtil.isValidPrecision(precision) ? precision : null;
+    }
+
+    static hasValidCoordinates(latitudeInteger, longitudeInteger) {
+        return PositionUtil.isValidLatitude(latitudeInteger)
+            && PositionUtil.isValidLongitude(longitudeInteger);
+    }
+
     /**
      * Obfuscates the provided latitude or longitude down to the provided precision in bits.
      * This is based on the same logic in the official meshtastic firmware.
      * https://github.com/meshtastic/firmware/blob/0a93261c0646f93aea518cc0599e547e9dc0e997/src/modules/PositionModule.cpp#L187
      */
     static setPositionPrecision(latitudeOrLongitudeInteger, precision) {
+
+        if(!Number.isInteger(latitudeOrLongitudeInteger)
+            || latitudeOrLongitudeInteger < -2147483648
+            || latitudeOrLongitudeInteger > 2147483647){
+            throw new RangeError("Position value must be a signed 32-bit integer");
+        }
+
+        if(!PositionUtil.isValidPrecision(precision)){
+            throw new RangeError("Position precision must be an integer between 1 and 32");
+        }
 
         // check if we should use the provided precision
         if(precision > 0 && precision < 32){

@@ -1,24 +1,31 @@
 {
   "name": "meshtastic-map",
   "version": "1.0.0",
-  "description": "",
+  "description": "Self-hosted MQTT-powered map for Meshtastic nodes and telemetry.",
   "main": "src/index.js",
   "scripts": {
-    "test": "jest"
+    "start": "node src/index.js",
+    "start:mqtt": "node src/mqtt.js",
+    "admin": "node src/admin.js",
+    "test": "jest",
+    "check": "node --check src/index.js && node --check src/mqtt.js && node --check src/admin.js && jest --runInBand"
   },
   "author": "",
-  "license": "ISC",
+  "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  },
   "dependencies": {
-    "@prisma/client": "^5.11.0",
+    "@prisma/client": "^5.22.0",
     "command-line-args": "^5.2.1",
-    "command-line-usage": "^7.0.1",
-    "compression": "^1.7.4",
-    "express": "^5.0.0",
-    "mqtt": "^5.3.6",
-    "protobufjs": "^7.2.6"
+    "command-line-usage": "^7.0.4",
+    "compression": "^1.8.1",
+    "express": "^5.2.1",
+    "mqtt": "^5.15.2",
+    "protobufjs": "^7.6.5"
   },
   "devDependencies": {
     "jest": "^29.7.0",
-    "prisma": "^5.10.2"
+    "prisma": "^5.22.0"
   }
 }

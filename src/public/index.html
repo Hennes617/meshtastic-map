@@ -1,8 +1,9 @@
-<html>
+<!doctype html>
+<html lang="en">
 <head>
 
     <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
     <title>Meshtastic Map</title>
     <meta name="title" content="Meshtastic Map">
     <meta name="description" content="An interactive map of all Meshtastic nodes.">
@@ -156,7 +157,11 @@
         }
 
         .z-sidebar {
-            z-index: 1002;
+            z-index: 9000;
+        }
+
+        .z-status {
+            z-index: 7000;
         }
 
         .app-header {
@@ -204,6 +209,84 @@
             transform: translateY(-1px);
         }
 
+        .icon-button:focus-visible,
+        .ghost-button:focus-visible,
+        .search-result:focus-visible {
+            outline: 3px solid rgba(17, 94, 89, 0.35);
+            outline-offset: 2px;
+        }
+
+        .map-status {
+            position: fixed;
+            top: calc(env(safe-area-inset-top, 0px) + 5.25rem);
+            left: 50%;
+            display: flex;
+            max-width: min(34rem, calc(100vw - 1.5rem));
+            transform: translateX(-50%);
+            align-items: center;
+            gap: 0.75rem;
+            border: 1px solid var(--border-soft);
+            border-radius: 9999px;
+            background: rgba(255, 255, 255, 0.96);
+            padding: 0.65rem 0.9rem;
+            color: var(--text-main);
+            box-shadow: var(--shadow-soft);
+            backdrop-filter: blur(16px);
+        }
+
+        .map-status[data-type="error"] {
+            border-color: #fecaca;
+            background: rgba(254, 242, 242, 0.98);
+            color: #991b1b;
+        }
+
+        .map-status[data-type="success"] {
+            border-color: #bbf7d0;
+            background: rgba(240, 253, 244, 0.98);
+            color: #166534;
+        }
+
+        .map-status[hidden] {
+            display: none;
+        }
+
+        .has-announcement .map-status {
+            top: calc(env(safe-area-inset-top, 0px) + 8.75rem);
+        }
+
+        .panel-frame {
+            height: 100%;
+            min-height: 0;
+        }
+
+        .panel-scroll {
+            min-height: 0;
+            flex: 1 1 auto;
+            overflow-y: auto;
+            overscroll-behavior: contain;
+        }
+
+        @media (max-width: 639px) {
+            .app-header {
+                min-height: 4rem;
+            }
+
+            .map-status {
+                border-radius: 1rem;
+            }
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+            *,
+            *::before,
+            *::after {
+                scroll-behavior: auto !important;
+                transition-duration: 0.01ms !important;
+                animation-duration: 0.01ms !important;
+                animation-iteration-count: 1 !important;
+            }
+        }
+
         .surface-card {
             background: linear-gradient(180deg, rgba(255, 255, 255, 0.96) 0%, rgba(250, 248, 244, 0.96) 100%);
             border: 1px solid var(--border-soft);
@@ -241,87 +324,88 @@
 
 </head>
 <body class="h-full">
-<div id="app" v-cloak>
+<div id="app" v-cloak class="h-full" :class="{ 'has-announcement': isShowingAnnouncement }">
 
-    <div class="flex flex-col h-full w-full overflow-hidden">
-        <div class="flex flex-col h-full">
+    <div class="flex h-full min-h-0 w-full flex-col overflow-hidden">
+        <div class="flex h-full min-h-0 flex-col">
 
             <!-- announcement -->
-            <div v-if="isShowingAnnouncement" class="flex bg-gray-900 text-white p-2 border-gray-300 border-b">
+            <aside v-if="isShowingAnnouncement" aria-label="Announcement" class="flex min-w-0 items-center gap-3 border-b border-gray-700 bg-gray-900 px-3 py-2 text-white">
 
                 <!-- info -->
-                <div class="my-auto leading-tight">
+                <div class="min-w-0 flex-1 leading-tight">
                     <div class="font-bold">Introducing MeshCore</div>
-                    <div class="text-sm">
+                    <div class="mt-0.5 text-sm text-gray-200">
                         <span>Looking for a new mesh project to tinker with? Check out <a target="_blank" href="https://meshcore.nz" class="underline">MeshCore</a></span>
                     </div>
                 </div>
 
                 <!-- action buttons -->
-                <div class="flex my-auto ml-auto mr-0 sm:mr-2">
-                    <a @click="dismissAnnouncement" href="javascript:void(0)" class="rounded-full">
-                        <div class="bg-white text-black hover:bg-gray-100 p-2 rounded-full">
+                <div class="flex flex-none items-center">
+                    <button type="button" @click="dismissAnnouncement" class="rounded-full" aria-label="Dismiss announcement">
+                        <span class="flex bg-white text-black hover:bg-gray-100 p-2 rounded-full">
                             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-6">
                                 <path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12" />
                             </svg>
-                        </div>
-                    </a>
+                        </span>
+                    </button>
                 </div>
 
-            </div>
+            </aside>
 
             <!-- header -->
-            <div class="app-header flex min-h-[4.5rem] items-center gap-3 px-3 py-2 sm:px-4">
+            <header class="app-header flex min-h-[4.5rem] min-w-0 items-center gap-2 px-2 py-2 sm:gap-3 sm:px-4">
 
                 <!-- close mobile search button -->
-                <div v-if="isShowingMobileSearch" class="my-auto">
-                    <a @click="isShowingMobileSearch = false" href="javascript:void(0)" class="rounded-full">
-                        <div class="icon-button p-2.5">
+                <div v-if="isShowingMobileSearch" class="my-auto flex-none">
+                    <button type="button" @click="hideMobileSearch" class="rounded-full" aria-label="Close search">
+                        <span class="icon-button flex p-2 sm:p-2.5">
                             <svg class="w-6 h-6" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
                                 <path stroke-linecap="round" stroke-linejoin="round" d="M10.5 19.5 3 12m0 0 7.5-7.5M3 12h18" />
                             </svg>
-                        </div>
-                    </a>
+                        </span>
+                    </button>
                 </div>
 
                 <!-- icon -->
                 <div v-if="!isShowingMobileSearch" class="hidden sm:block my-auto mr-3">
-                    <img class="w-10 h-10 rounded-2xl shadow-sm ring-1 ring-black/5" src="icon.png"/>
+                    <img class="w-10 h-10 rounded-2xl shadow-sm ring-1 ring-black/5" src="icon.png" alt=""/>
                 </div>
 
                 <!-- app info -->
-                <div v-if="!isShowingMobileSearch" class="my-auto leading-tight">
-                    <div class="text-lg font-semibold tracking-tight text-stone-950">Meshtastic Map</div>
-                    <div class="text-sm text-stone-600">Created by Hennes Bolte</div>
+                <div v-if="!isShowingMobileSearch" class="my-auto min-w-0 flex-1 leading-tight lg:flex-none">
+                    <div class="truncate text-base font-semibold tracking-tight text-stone-950 sm:text-lg">Meshtastic Map</div>
+                    <div class="hidden text-sm text-stone-600 sm:block">Created by Hennes Bolte</div>
                 </div>
 
                 <!-- search bar -->
-                <div class="mx-3 flex-1 relative" :class="{ 'hidden lg:block': !isShowingMobileSearch }">
-                    <input v-model="searchText" type="text" class="search-input text-sm block" :placeholder="`Search ${mappableNodesCount} mappable / ${nodes.length} total nodes...`">
-                    <div v-if="searchText !== ''" class="absolute z-search bg-white w-full border border-gray-200 rounded-lg shadow-md mt-1 overflow-y-scroll max-h-80 divide-y divide-gray-200">
+                <div class="relative min-w-0 flex-1" :class="{ 'hidden lg:block': !isShowingMobileSearch }">
+                    <label for="node-search" class="sr-only">Search nodes</label>
+                    <input id="node-search" ref="searchInput" v-model.trim="searchText" type="search" autocomplete="off" class="search-input text-sm block" :placeholder="`Search ${mappableNodesCount} mappable / ${nodes.length} total nodes...`" aria-controls="node-search-results" @keydown.esc="hideMobileSearch">
+                    <div v-if="searchText !== ''" id="node-search-results" class="absolute z-search mt-1 max-h-[min(20rem,60vh)] w-full overflow-y-auto rounded-xl border border-gray-200 bg-white shadow-xl" role="listbox" aria-label="Node search results">
 
                         <template v-if="searchedNodes.length > 0">
-                            <div @click="onSearchResultNodeClick(node)" class="flex space-x-2 p-2 hover:bg-gray-100 cursor-pointer" v-for="node of searchedNodes">
+                            <button type="button" @click="onSearchResultNodeClick(node)" class="search-result flex w-full space-x-2 border-b border-gray-100 p-2 text-left hover:bg-gray-100" v-for="node of searchedNodes" :key="node.node_id" role="option">
                                 <div>
-                                    <div class="flex rounded-full h-12 w-12 text-white shadow" :class="[ `bg-[${getNodeColour(node.node_id)}]`, `text-[${getNodeTextColour(node.node_id)}]` ]">
+                                    <div class="flex rounded-full h-12 w-12 shadow" :style="{ backgroundColor: getNodeColour(node.node_id), color: getNodeTextColour(node.node_id) }" aria-hidden="true">
                                         <div class="mx-auto my-auto drop-shadow-sm">{{ node.short_name }}</div>
                                     </div>
                                 </div>
-                                <div>
+                                <div class="min-w-0">
                                     <div class="text-gray-900" :class="{ 'text-red-500': node.latitude == null || node.longitude == null }">{{ node.long_name !== '' ? node.long_name : "-" }}</div>
                                     <div class="flex space-x-1 text-sm text-gray-700">
                                         <div>{{ node.node_id_hex }} / {{ node.node_id }}</div>
                                     </div>
                                 </div>
-                            </div>
-                            <div v-if="searchedNodes.length === 500" class="text-gray-500 text-sm px-2 py-1">
-                                Only the first 500 results are shown.
+                            </button>
+                            <div v-if="hasMoreSearchResults" class="text-gray-500 text-sm px-3 py-2" role="status">
+                                Refine your search to see results beyond the first {{ searchResultLimit }}.
                             </div>
                         </template>
 
                         <template v-else>
-                            <div class="p-2">
-                                No results found...
+                            <div class="p-3 text-sm text-gray-600" role="status">
+                                No nodes match “{{ searchText }}”.
                             </div>
                         </template>
 
@@ -329,68 +413,80 @@
                 </div>
 
                 <!-- header action buttons -->
-                <div v-if="!isShowingMobileSearch" class="flex my-auto ml-auto mr-0 sm:mr-2 space-x-1 sm:space-x-2">
-                    <a @click="isShowingInfoModal = true" href="javascript:void(0)" class="tooltip rounded-full">
-                        <div class="icon-button p-2.5">
+                <nav v-if="!isShowingMobileSearch" aria-label="Map actions" class="flex flex-none items-center space-x-1 sm:ml-auto sm:mr-2 sm:space-x-2">
+                    <button type="button" @click="isShowingInfoModal = true" class="tooltip rounded-full" aria-label="About this map">
+                        <span class="icon-button flex p-2 sm:p-2.5">
                             <svg class="w-6 h-6" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
                                 <path stroke-linecap="round" stroke-linejoin="round" d="m11.25 11.25.041-.02a.75.75 0 0 1 1.063.852l-.708 2.836a.75.75 0 0 0 1.063.853l.041-.021M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9-3.75h.008v.008H12V8.25Z" />
                             </svg>
-                        </div>
+                        </span>
                         <div class="hidden sm:block">
                             <span class="tooltip-text">About</span>
                         </div>
-                    </a>
-                    <a @click="isShowingMobileSearch = true" href="javascript:void(0)" class="tooltip rounded-full block lg:hidden">
-                        <div id="search-button" class="icon-button p-2.5">
+                    </button>
+                    <button type="button" @click="showMobileSearch" class="tooltip rounded-full block lg:hidden" aria-label="Search nodes">
+                        <span id="search-button" class="icon-button flex p-2 sm:p-2.5">
                             <svg class="w-6 h-6" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" fill="none" stroke-linecap="round" stroke-linejoin="round">
                                 <path stroke="none" d="M0 0h24v24H0z" fill="none"></path>
                                 <path d="M10 10m-7 0a7 7 0 1 0 14 0a7 7 0 1 0 -14 0"></path>
                                 <path d="M21 21l-6 -6"></path>
                             </svg>
-                        </div>
+                        </span>
                         <div class="hidden sm:block">
                             <span class="tooltip-text">Search</span>
                         </div>
-                    </a>
-                    <a @click="isShowingHardwareModels = !isShowingHardwareModels" href="javascript:void(0)" class="tooltip rounded-full hidden sm:block">
-                        <div class="icon-button p-2.5">
+                    </button>
+                    <button type="button" @click="isShowingHardwareModels = !isShowingHardwareModels" class="tooltip rounded-full hidden sm:block" aria-label="Browse Meshtastic devices">
+                        <span class="icon-button flex p-2 sm:p-2.5">
                             <svg class="w-6 h-6" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
                                 <path stroke-linecap="round" stroke-linejoin="round" d="M10.5 1.5H8.25A2.25 2.25 0 0 0 6 3.75v16.5a2.25 2.25 0 0 0 2.25 2.25h7.5A2.25 2.25 0 0 0 18 20.25V3.75a2.25 2.25 0 0 0-2.25-2.25H13.5m-3 0V3h3V1.5m-3 0h3m-3 18.75h3" />
                             </svg>
-                        </div>
+                        </span>
                         <div class="hidden sm:block">
                             <span class="tooltip-text">Devices</span>
                         </div>
-                    </a>
-                    <a @click="isShowingSettings = true" href="javascript:void(0)" class="tooltip rounded-full">
-                        <div class="icon-button p-2.5">
+                    </button>
+                    <button type="button" @click="isShowingSettings = true" class="tooltip rounded-full" aria-label="Open map settings">
+                        <span class="icon-button flex p-2 sm:p-2.5">
                             <svg class="w-6 h-6" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
                                 <path stroke-linecap="round" stroke-linejoin="round" d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.325.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 0 1 1.37.49l1.296 2.247a1.125 1.125 0 0 1-.26 1.431l-1.003.827c-.293.241-.438.613-.43.992a7.723 7.723 0 0 1 0 .255c-.008.378.137.75.43.991l1.004.827c.424.35.534.955.26 1.43l-1.298 2.247a1.125 1.125 0 0 1-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.47 6.47 0 0 1-.22.128c-.331.183-.581.495-.644.869l-.213 1.281c-.09.543-.56.94-1.11.94h-2.594c-.55 0-1.019-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 0 1-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 0 1-1.369-.49l-1.297-2.247a1.125 1.125 0 0 1 .26-1.431l1.004-.827c.292-.24.437-.613.43-.991a6.932 6.932 0 0 1 0-.255c.007-.38-.138-.751-.43-.992l-1.004-.827a1.125 1.125 0 0 1-.26-1.43l1.297-2.247a1.125 1.125 0 0 1 1.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.086.22-.128.332-.183.582-.495.644-.869l.214-1.28Z" />
                                 <path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" />
                             </svg>
-                        </div>
+                        </span>
                         <div class="hidden sm:block">
                             <span class="tooltip-text">Settings</span>
                         </div>
-                    </a>
-                    <a href="#" class="tooltip rounded-full" onclick="reload()">
-                        <div id="reload-button" class="icon-button p-2.5">
+                    </button>
+                    <button type="button" class="tooltip rounded-full" onclick="reload()" aria-label="Reload map data">
+                        <span id="reload-button" class="icon-button flex p-2 sm:p-2.5">
                             <svg class="w-6 h-6" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" fill="none" stroke-linecap="round" stroke-linejoin="round">
                                 <path stroke="none" d="M0 0h24v24H0z" fill="none"></path>
                                 <path d="M19.933 13.041a8 8 0 1 1 -9.925 -8.788c3.899 -1 7.935 1.007 9.425 4.747"></path>
                                 <path d="M20 4v5h-5"></path>
                             </svg>
-                        </div>
+                        </span>
                         <div class="hidden sm:block">
                             <span class="tooltip-text">Reload</span>
                         </div>
-                    </a>
-                </div>
+                    </button>
+                </nav>
 
+            </header>
+
+            <div id="map-status" class="map-status z-status text-sm" data-type="loading" role="status" aria-live="polite" hidden>
+                <svg id="map-status-spinner" class="h-5 w-5 flex-none animate-spin" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" aria-hidden="true">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 0 1 8-8v4a4 4 0 0 0-4 4H4Z"></path>
+                </svg>
+                <span id="map-status-message" class="min-w-0 flex-1">Loading map data…</span>
+                <button id="map-status-retry" type="button" onclick="reload()" class="hidden flex-none rounded-full border border-current px-3 py-1 font-medium hover:bg-white/70">Retry</button>
+                <button id="map-status-dismiss" type="button" onclick="dismissMapStatus()" class="hidden flex-none rounded-full p-1 hover:bg-black/5" aria-label="Dismiss status">
+                    <svg class="h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18 18 6M6 6l12 12"/></svg>
+                </button>
             </div>
 
             <!-- map -->
-            <div id="map" style="width:100%;height:100%;"></div>
+            <div id="map" class="min-h-0 flex-1" role="region" aria-label="Interactive Meshtastic node map" style="width:100%;"></div>
 
         </div>
     </div>
@@ -417,7 +513,7 @@
                 leave-active-class="transition duration-300 ease-in-out transform"
                 leave-from-class="translate-y-0"
                 leave-to-class="translate-y-full">
-            <div @click="dismissInfoModal" v-show="isShowingInfoModal" class="fixed left-0 right-0 top-0 bottom-0 lg:pointer-events-none">
+            <div ref="infoDialog" tabindex="-1" @click="dismissInfoModal" v-show="isShowingInfoModal" class="fixed inset-0 lg:pointer-events-none" role="dialog" aria-modal="true" aria-labelledby="info-modal-title">
                 <div class="flex w-full h-full overflow-y-auto p-4">
                     <div @click.stop class="surface-card mx-auto my-auto w-full max-w-2xl flex-col p-4 sm:p-6 lg:pointer-events-auto">
                         <div class="relative flex">
@@ -425,15 +521,15 @@
                             <!-- close button -->
                             <div class="absolute top-0 right-0">
                                 <div class="h-7">
-                                    <a href="javascript:void(0)" class="rounded-full" @click="dismissInfoModal">
-                                        <div class="icon-button p-2.5">
+                                    <button type="button" class="rounded-full" @click="dismissInfoModal" aria-label="Close about dialog">
+                                        <span class="icon-button flex p-2.5">
                                             <svg class="w-6 h-6" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" fill="none" stroke-linecap="round" stroke-linejoin="round">
                                                 <path stroke="none" d="M0 0h24v24H0z" fill="none"></path>
                                                 <path d="M18 6l-12 12"></path>
                                                 <path d="M6 6l12 12"></path>
                                             </svg>
-                                        </div>
-                                    </a>
+                                        </span>
+                                    </button>
                                 </div>
                             </div>
 
@@ -442,9 +538,9 @@
 
                                 <!-- app info -->
                                 <div class="w-full mx-auto text-center">
-                                    <img src="./icon.png" class="mx-auto mb-3 h-16 w-16 rounded-3xl shadow-sm ring-1 ring-black/5"/>
+                                    <img src="./icon.png" alt="" class="mx-auto mb-3 h-16 w-16 rounded-3xl shadow-sm ring-1 ring-black/5"/>
                                     <div class="text-xs font-semibold uppercase tracking-[0.28em] text-stone-500">Lightweight public mesh view</div>
-                                    <h1 class="mt-2 text-2xl font-semibold tracking-tight text-stone-950">Meshtastic Map</h1>
+                                    <h1 id="info-modal-title" class="mt-2 text-2xl font-semibold tracking-tight text-stone-950">Meshtastic Map</h1>
                                     <h2 class="mt-1 text-sm text-stone-600">Created by Hennes Bolte</h2>
                                     <div class="w-full mx-auto text-center mt-4">
                                         <a target="_blank" href="https://github.com/Hennes617/meshtastic-map" title="GitHub" class="inline-flex items-center gap-2 rounded-full border border-stone-300 bg-stone-950 px-4 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-stone-800">
@@ -523,11 +619,9 @@
 
                                 <!-- dismiss button -->
                                 <div class="mx-auto">
-                                    <a href="javascript:void(0)" @click="dismissInfoModal">
-                                        <div class="ghost-button text-sm font-medium text-stone-800">
+                                    <button type="button" class="ghost-button text-sm font-medium text-stone-800" @click="dismissInfoModal">
                                             Dismiss
-                                        </div>
-                                    </a>
+                                    </button>
                                 </div>
 
                             </div>
@@ -541,7 +635,7 @@
     </div>
 
     <!-- hardware models sidebar -->
-    <div class="relative z-sidebar" role="dialog" aria-modal="true">
+    <div class="relative z-sidebar">
 
         <!-- overlay -->
         <transition
@@ -562,40 +656,49 @@
                 leave-active-class="transition duration-300 ease-in-out transform"
                 leave-from-class="translate-x-0"
                 leave-to-class="-translate-x-full">
-            <div v-show="isShowingHardwareModels" class="fixed top-0 left-0 bottom-0">
-                <div class="w-screen max-w-md overflow-hidden">
-                    <div class="flex h-full flex-col bg-white shadow-xl">
+            <div ref="hardwareModelsDialog" tabindex="-1" v-show="isShowingHardwareModels" class="fixed inset-y-0 left-0" role="dialog" aria-modal="true" aria-labelledby="hardware-models-title">
+                <div class="h-full w-screen max-w-md overflow-hidden">
+                    <div class="panel-frame flex flex-col bg-white shadow-xl">
 
                         <!-- slideover header -->
                         <div class="p-2 border-b border-gray-200 shadow">
                             <div class="flex items-start justify-between">
                                 <div>
-                                    <h2 class="font-bold">Meshtastic Devices</h2>
+                                    <h2 id="hardware-models-title" class="font-bold">Meshtastic Devices</h2>
                                     <h3 class="text-sm">Ordered by most popular</h3>
                                 </div>
                                 <div class="my-auto ml-3 flex h-7 items-center">
-                                    <a href="javascript:void(0)" class="rounded-full" @click="isShowingHardwareModels = !isShowingHardwareModels">
-                                        <div class="bg-gray-100 hover:bg-gray-200 p-2 rounded-full">
+                                    <button type="button" class="rounded-full" @click="isShowingHardwareModels = false" aria-label="Close devices panel">
+                                        <span class="flex bg-gray-100 hover:bg-gray-200 p-2 rounded-full">
                                             <svg class="w-6 h-6" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" fill="none" stroke-linecap="round" stroke-linejoin="round">
                                                 <path stroke="none" d="M0 0h24v24H0z" fill="none"></path>
                                                 <path d="M18 6l-12 12"></path>
                                                 <path d="M6 6l12 12"></path>
                                             </svg>
-                                        </div>
-                                    </a>
+                                        </span>
+                                    </button>
                                 </div>
                             </div>
                         </div>
 
                         <!-- list of hardware models -->
-                        <ul role="list" class="flex-1 divide-y divide-gray-200 overflow-y-auto">
+                        <div v-if="hardwareModelStats == null && !hardwareModelStatsError" class="panel-scroll flex items-center justify-center p-6 text-sm text-gray-600" role="status">
+                            Loading device statistics…
+                        </div>
+                        <div v-else-if="hardwareModelStatsError" class="panel-scroll flex flex-col items-center justify-center gap-3 p-6 text-center">
+                            <p class="text-sm text-red-700" role="alert">{{ hardwareModelStatsError }}</p>
+                            <button type="button" @click="loadHardwareModelStats" class="ghost-button text-sm font-medium">Retry</button>
+                        </div>
+                        <div v-else-if="hardwareModelStats.length === 0" class="panel-scroll flex items-center justify-center p-6 text-sm text-gray-600" role="status">
+                            No device statistics are available yet.
+                        </div>
+                        <ul v-else role="list" class="panel-scroll divide-y divide-gray-200">
                             <li v-for="hardwareModel of hardwareModelStats">
                                 <div class="group relative flex items-center">
-                                    <a href="#" class="block flex-1 px-4 py-2">
-                                        <div class="absolute inset-0 group-hover:bg-gray-100" aria-hidden="true"></div>
+                                    <div class="block flex-1 px-4 py-2">
                                         <div class="relative flex min-w-0 flex-1 items-center">
                                             <span class="relative inline-block flex-shrink-0 mr-4">
-                                                <img v-if="hardwareModel.has_hardware_image" class="h-20 w-20 rounded object-contain" :src="hardwareModel.hardware_image_url" alt="" onerror="if(this.src != '/images/no_image.png') this.src = '/images/no_image.png';">
+                                                <img v-if="hardwareModel.has_hardware_image" class="h-20 w-20 rounded object-contain" :src="hardwareModel.hardware_image_url" :alt="`${hardwareModel.hardware_model_name} device`" onerror="if(this.src != '/images/no_image.png') this.src = '/images/no_image.png';">
                                                 <div v-else class="flex h-20 w-20 items-center justify-center rounded bg-stone-100 text-center text-xs font-medium text-stone-500">
                                                     No<br/>Image
                                                 </div>
@@ -605,7 +708,7 @@
                                                 <p class="truncate text-sm text-gray-500">{{ hardwareModel.count }} nodes on the map</p>
                                             </div>
                                         </div>
-                                    </a>
+                                    </div>
                                 </div>
                             </li>
                         </ul>
@@ -618,7 +721,7 @@
     </div>
 
     <!-- node info sidebar -->
-    <div class="relative z-sidebar" role="dialog" aria-modal="true">
+    <div class="relative z-sidebar">
 
         <!-- overlay -->
         <transition
@@ -639,44 +742,44 @@
                 leave-active-class="transition duration-300 ease-in-out transform"
                 leave-from-class="translate-x-0"
                 leave-to-class="-translate-x-full">
-            <div v-show="selectedNode != null" class="fixed top-0 left-0 bottom-0">
-                <div v-if="selectedNode != null" class="w-screen max-w-md overflow-hidden">
-                    <div class="flex h-full flex-col bg-white shadow-xl">
+            <div ref="nodeInfoDialog" tabindex="-1" v-show="selectedNode != null" class="fixed inset-y-0 left-0" role="dialog" aria-modal="true" aria-labelledby="node-info-title">
+                <div v-if="selectedNode != null" class="h-full w-screen max-w-md overflow-hidden">
+                    <div class="panel-frame flex flex-col bg-white shadow-xl">
 
                         <!-- slideover header -->
                         <div class="p-2 border-b border-gray-200 shadow">
                             <div class="flex">
                                 <div class="my-auto mr-2">
-                                    <div class="flex rounded-full h-12 w-12 text-white shadow" :class="[ `bg-[${getNodeColour(selectedNode.node_id)}]`, `text-[${getNodeTextColour(selectedNode.node_id)}]` ]">
+                                    <div class="flex rounded-full h-12 w-12 shadow" :style="{ backgroundColor: getNodeColour(selectedNode.node_id), color: getNodeTextColour(selectedNode.node_id) }" aria-hidden="true">
                                         <div class="mx-auto my-auto drop-shadow-sm">{{ selectedNode.short_name }}</div>
                                     </div>
                                 </div>
                                 <div class="my-auto mr-auto">
-                                    <h2 class="font-bold">Node Info</h2>
+                                    <h2 id="node-info-title" class="font-bold">Node Info</h2>
                                     <h3 class="text-sm">{{ selectedNode.long_name }}</h3>
                                 </div>
                                 <div class="my-auto ml-2 flex h-7 items-center space-x-2">
-                                    <a href="javascript:void(0)" class="rounded-full" @click="copyShareLinkForNode(selectedNode.node_id)">
-                                        <div class="bg-gray-100 hover:bg-gray-200 p-2 rounded-full">
+                                    <button type="button" class="rounded-full" @click="copyShareLinkForNode(selectedNode.node_id)" aria-label="Copy node share link">
+                                        <span class="flex bg-gray-100 hover:bg-gray-200 p-2 rounded-full">
                                             <svg xmlns="http://www.w3.org/2000/svg" fill="currentColor" viewBox="0 0 256 256" class="size-6">
                                                 <path d="M216,112v96a16,16,0,0,1-16,16H56a16,16,0,0,1-16-16V112A16,16,0,0,1,56,96H80a8,8,0,0,1,0,16H56v96H200V112H176a8,8,0,0,1,0-16h24A16,16,0,0,1,216,112ZM93.66,69.66,120,43.31V136a8,8,0,0,0,16,0V43.31l26.34,26.35a8,8,0,0,0,11.32-11.32l-40-40a8,8,0,0,0-11.32,0l-40,40A8,8,0,0,0,93.66,69.66Z"></path>
                                             </svg>
-                                        </div>
-                                    </a>
-                                    <a href="javascript:void(0)" class="rounded-full" @click="selectedNode = null">
-                                        <div class="bg-gray-100 hover:bg-gray-200 p-2 rounded-full">
+                                        </span>
+                                    </button>
+                                    <button type="button" class="rounded-full" @click="selectedNode = null" aria-label="Close node information">
+                                        <span class="flex bg-gray-100 hover:bg-gray-200 p-2 rounded-full">
                                             <svg class="w-6 h-6" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" fill="none" stroke-linecap="round" stroke-linejoin="round">
                                                 <path stroke="none" d="M0 0h24v24H0z" fill="none"></path>
                                                 <path d="M18 6l-12 12"></path>
                                                 <path d="M6 6l12 12"></path>
                                             </svg>
-                                        </div>
-                                    </a>
+                                        </span>
+                                    </button>
                                 </div>
                             </div>
                         </div>
 
-                        <div class="overflow-y-auto">
+                        <div class="panel-scroll">
 
                             <!-- no position banner -->
                             <div v-if="findNodeMarkerById(selectedNode.node_id) == null" class="flex bg-orange-500 text-white p-2">
@@ -690,7 +793,7 @@
 
                             <div class="flex flex-col my-2">
                                 <div class="mx-auto">
-                                    <img v-if="selectedNode.has_hardware_image" class="h-48 w-48 rounded object-contain" :src="selectedNode.hardware_image_url" alt="" onerror="if(this.src != '/images/no_image.png') this.src = '/images/no_image.png';">
+                                    <img v-if="selectedNode.has_hardware_image" class="h-48 w-48 rounded object-contain" :src="selectedNode.hardware_image_url" :alt="`${selectedNode.hardware_model_name} device`" onerror="if(this.src != '/images/no_image.png') this.src = '/images/no_image.png';">
                                     <div v-else class="flex h-36 w-36 items-center justify-center rounded-3xl border border-stone-200 bg-stone-50 px-4 text-center text-sm font-medium text-stone-500">
                                         Device image unavailable
                                     </div>
@@ -1132,8 +1235,8 @@
                                 </div>
                                 <ul role="list" class="flex-1 divide-y divide-gray-200">
                                     <template v-if="selectedNodeTraceroutes.length > 0">
-                                        <li @click="showTraceRoute(traceroute)" v-for="traceroute of selectedNodeTraceroutes">
-                                            <div class="relative flex items-center">
+                                        <li v-for="traceroute of selectedNodeTraceroutes" :key="traceroute.id">
+                                            <button type="button" @click="showTraceRoute(traceroute)" class="relative flex w-full items-center text-left hover:bg-gray-50">
                                                 <div class="block flex-1 px-4 py-2">
                                                     <div class="relative flex min-w-0 flex-1 items-center">
                                                         <div>
@@ -1142,7 +1245,7 @@
                                                         </div>
                                                     </div>
                                                 </div>
-                                            </div>
+                                            </button>
                                         </li>
                                     </template>
                                     <template v-else>
@@ -1234,7 +1337,7 @@
     </div>
 
     <!-- traceroute info sidebar -->
-    <div class="relative z-sidebar" role="dialog" aria-modal="true">
+    <div class="relative z-sidebar">
 
         <!-- overlay -->
         <transition
@@ -1255,47 +1358,47 @@
                 leave-active-class="transition duration-300 ease-in-out transform"
                 leave-from-class="translate-x-0"
                 leave-to-class="-translate-x-full">
-            <div v-show="selectedTraceRoute != null" class="fixed top-0 left-0 bottom-0">
-                <div v-if="selectedTraceRoute != null" class="w-screen max-w-md overflow-hidden">
-                    <div class="flex h-full flex-col bg-white shadow-xl">
+            <div ref="traceRouteDialog" tabindex="-1" v-show="selectedTraceRoute != null" class="fixed inset-y-0 left-0" role="dialog" aria-modal="true" aria-labelledby="traceroute-title">
+                <div v-if="selectedTraceRoute != null" class="h-full w-screen max-w-md overflow-hidden">
+                    <div class="panel-frame flex flex-col bg-white shadow-xl">
 
                         <!-- slideover header -->
                         <div class="p-2 border-b border-gray-200 shadow">
                             <div class="flex items-start justify-between">
                                 <div>
-                                    <h2 class="font-bold">Traceroute #{{ selectedTraceRoute.id }}</h2>
+                                    <h2 id="traceroute-title" class="font-bold">Traceroute #{{ selectedTraceRoute.id }}</h2>
                                     <h3 class="text-sm">{{ moment(new Date(selectedTraceRoute.updated_at)).fromNow() }} - {{ selectedTraceRoute.route.length }} hops {{ selectedTraceRoute.channel_id ? `on ${selectedTraceRoute.channel_id}` : '' }}</h3>
                                 </div>
                                 <div class="my-auto ml-3 flex h-7 items-center">
-                                    <a href="javascript:void(0)" class="rounded-full" @click="selectedTraceRoute = null">
-                                        <div class="bg-gray-100 hover:bg-gray-200 p-2 rounded-full">
+                                    <button type="button" class="rounded-full" @click="selectedTraceRoute = null" aria-label="Close traceroute">
+                                        <span class="flex bg-gray-100 hover:bg-gray-200 p-2 rounded-full">
                                             <svg class="w-6 h-6" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" fill="none" stroke-linecap="round" stroke-linejoin="round">
                                                 <path stroke="none" d="M0 0h24v24H0z" fill="none"></path>
                                                 <path d="M18 6l-12 12"></path>
                                                 <path d="M6 6l12 12"></path>
                                             </svg>
-                                        </div>
-                                    </a>
+                                        </span>
+                                    </button>
                                 </div>
                             </div>
                         </div>
 
-                        <div class="overflow-y-auto">
+                        <div class="panel-scroll">
 
                             <!-- details -->
                             <div class="p-2">
                                 <ul role="list" class="space-y-3">
 
                                     <!-- node that initiated traceroute -->
-                                    <li :onclick="`goToNode(${selectedTraceRoute.to})`" class="relative flex gap-x-4">
+                                    <li class="relative flex gap-x-4">
                                         <div class="absolute left-0 top-0 flex w-12 justify-center top-3 -bottom-3">
                                             <div class="w-px bg-gray-200"></div>
                                         </div>
                                         <div class="my-auto relative flex flex-none items-center justify-center">
                                             <div>
-                                                <div class="flex rounded-full h-12 w-12 text-white shadow" :class="[ `bg-[${getNodeColour(selectedTraceRoute.to)}]`, `text-[${getNodeTextColour(selectedTraceRoute.to)}]` ]">
+                                                <button type="button" @click="goToNodeFromPanel(selectedTraceRoute.to)" class="flex rounded-full h-12 w-12 shadow" :style="{ backgroundColor: getNodeColour(selectedTraceRoute.to), color: getNodeTextColour(selectedTraceRoute.to) }" :aria-label="`Go to ${findNodeById(selectedTraceRoute.to)?.long_name || 'traceroute start node'}`">
                                                     <div class="mx-auto my-auto drop-shadow-sm">{{ findNodeById(selectedTraceRoute.to)?.short_name ?? "?" }}</div>
-                                                </div>
+                                                </button>
                                             </div>
                                         </div>
                                         <div class="flex-auto py-0.5 text-sm leading-5 text-gray-500">
@@ -1306,15 +1409,15 @@
                                     </li>
 
                                     <!-- middleman nodes -->
-                                    <li :onclick="`goToNode(${route})`" v-for="route of selectedTraceRoute.route" class="relative flex gap-x-4">
+                                    <li v-for="route of selectedTraceRoute.route" :key="route" class="relative flex gap-x-4">
                                         <div class="absolute left-0 top-0 flex w-12 justify-center -bottom-3">
                                             <div class="w-px bg-gray-200"></div>
                                         </div>
                                         <div class="my-auto relative flex flex-none items-center justify-center">
                                             <div>
-                                                <div class="flex rounded-full h-12 w-12 text-white shadow" :class="[ `bg-[${getNodeColour(route)}]`, `text-[${getNodeTextColour(route)}]` ]">
+                                                <button type="button" @click="goToNodeFromPanel(route)" class="flex rounded-full h-12 w-12 shadow" :style="{ backgroundColor: getNodeColour(route), color: getNodeTextColour(route) }" :aria-label="`Go to ${findNodeById(route)?.long_name || 'traceroute hop'}`">
                                                     <div class="mx-auto my-auto drop-shadow-sm">{{ findNodeById(route)?.short_name ?? "?" }}</div>
-                                                </div>
+                                                </button>
                                             </div>
                                         </div>
                                         <div class="flex-auto py-0.5 text-sm leading-5 text-gray-500">
@@ -1325,15 +1428,15 @@
                                     </li>
 
                                     <!-- node that replied to traceroute -->
-                                    <li :onclick="`goToNode(${selectedTraceRoute.from})`" v-if="selectedTraceRoute.from" class="relative flex gap-x-4">
+                                    <li v-if="selectedTraceRoute.from" class="relative flex gap-x-4">
                                         <div class="absolute left-0 top-0 flex w-12 justify-center -bottom-3">
                                             <div class="w-px bg-gray-200"></div>
                                         </div>
                                         <div class="my-auto relative flex flex-none items-center justify-center">
                                             <div>
-                                                <div class="flex rounded-full h-12 w-12 text-white shadow" :class="[ `bg-[${getNodeColour(selectedTraceRoute.from)}]`, `text-[${getNodeTextColour(selectedTraceRoute.from)}]` ]">
+                                                <button type="button" @click="goToNodeFromPanel(selectedTraceRoute.from)" class="flex rounded-full h-12 w-12 shadow" :style="{ backgroundColor: getNodeColour(selectedTraceRoute.from), color: getNodeTextColour(selectedTraceRoute.from) }" :aria-label="`Go to ${findNodeById(selectedTraceRoute.from)?.long_name || 'traceroute reply node'}`">
                                                     <div class="mx-auto my-auto drop-shadow-sm">{{ findNodeById(selectedTraceRoute.from)?.short_name ?? "?" }}</div>
-                                                </div>
+                                                </button>
                                             </div>
                                         </div>
                                         <div class="flex-auto py-0.5 text-sm leading-5 text-gray-500">
@@ -1344,15 +1447,15 @@
                                     </li>
 
                                     <!-- node that gated traceroute to mqtt -->
-                                    <li :onclick="`goToNode(${selectedTraceRoute.gateway_id})`" v-if="selectedTraceRoute.gateway_id" class="relative flex gap-x-4">
+                                    <li v-if="selectedTraceRoute.gateway_id" class="relative flex gap-x-4">
                                         <div class="absolute left-0 top-0 flex w-12 justify-center h-6">
                                             <div class="w-px bg-gray-200"></div>
                                         </div>
                                         <div class="my-auto relative flex flex-none items-center justify-center">
                                             <div>
-                                                <div class="flex rounded-full h-12 w-12 text-white shadow" :class="[ `bg-[${getNodeColour(selectedTraceRoute.gateway_id)}]`, `text-[${getNodeTextColour(selectedTraceRoute.gateway_id)}]` ]">
+                                                <button type="button" @click="goToNodeFromPanel(selectedTraceRoute.gateway_id)" class="flex rounded-full h-12 w-12 shadow" :style="{ backgroundColor: getNodeColour(selectedTraceRoute.gateway_id), color: getNodeTextColour(selectedTraceRoute.gateway_id) }" :aria-label="`Go to ${findNodeById(selectedTraceRoute.gateway_id)?.long_name || 'MQTT gateway node'}`">
                                                     <div class="mx-auto my-auto drop-shadow-sm">{{ findNodeById(selectedTraceRoute.gateway_id)?.short_name ?? "?" }}</div>
-                                                </div>
+                                                </button>
                                             </div>
                                         </div>
                                         <div class="flex-auto py-0.5 text-sm leading-5 text-gray-500">
@@ -1383,7 +1486,7 @@
     </div>
 
     <!-- settings sidebar -->
-    <div class="relative z-sidebar" role="dialog" aria-modal="true">
+    <div class="relative z-sidebar">
 
         <!-- overlay -->
         <transition
@@ -1404,38 +1507,38 @@
                 leave-active-class="transition duration-300 ease-in-out transform"
                 leave-from-class="translate-x-0"
                 leave-to-class="-translate-x-full">
-            <div v-show="isShowingSettings" class="fixed top-0 left-0 bottom-0">
-                <div v-if="isShowingSettings" class="w-screen max-w-md overflow-hidden">
-                    <div class="flex h-full flex-col bg-white shadow-xl">
+            <div ref="settingsDialog" tabindex="-1" v-show="isShowingSettings" class="fixed inset-y-0 left-0" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+                <div v-if="isShowingSettings" class="h-full w-screen max-w-md overflow-hidden">
+                    <div class="panel-frame flex flex-col bg-white shadow-xl">
 
                         <!-- slideover header -->
                         <div class="p-2 border-b border-gray-200 shadow">
                             <div class="flex items-start justify-between">
                                 <div>
-                                    <h2 class="font-bold">Settings</h2>
+                                    <h2 id="settings-title" class="font-bold">Settings</h2>
                                     <h3 class="text-sm">Changes are only saved in this browser.</h3>
                                 </div>
                                 <div class="my-auto ml-3 flex h-7 items-center">
-                                    <a href="javascript:void(0)" class="rounded-full" @click="isShowingSettings = false">
-                                        <div class="bg-gray-100 hover:bg-gray-200 p-2 rounded-full">
+                                    <button type="button" class="rounded-full" @click="isShowingSettings = false" aria-label="Close settings">
+                                        <span class="flex bg-gray-100 hover:bg-gray-200 p-2 rounded-full">
                                             <svg class="w-6 h-6" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" fill="none" stroke-linecap="round" stroke-linejoin="round">
                                                 <path stroke="none" d="M0 0h24v24H0z" fill="none"></path>
                                                 <path d="M18 6l-12 12"></path>
                                                 <path d="M6 6l12 12"></path>
                                             </svg>
-                                        </div>
-                                    </a>
+                                        </span>
+                                    </button>
                                 </div>
                             </div>
                         </div>
 
-                        <div class="overflow-y-auto divide-y divide-gray-200">
+                        <div class="panel-scroll divide-y divide-gray-200">
 
                             <!-- configNodesMaxAgeInSeconds -->
                             <div class="p-2">
-                                <label class="block text-sm font-medium text-gray-900">Nodes Max Age</label>
-                                <div class="text-xs text-gray-600 mb-2">Nodes not updated within this time are hidden. Reload to update map.</div>
-                                <select v-model="configNodesMaxAgeInSeconds" class="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5">
+                                <label for="nodes-max-age" class="block text-sm font-medium text-gray-900">Nodes Max Age</label>
+                                <div id="nodes-max-age-help" class="text-xs text-gray-600 mb-2">Nodes not updated within this time are hidden. Reload to update map.</div>
+                                <select id="nodes-max-age" aria-describedby="nodes-max-age-help" v-model="configNodesMaxAgeInSeconds" class="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5">
                                     <option :value="null">Show All</option>
                                     <option value="900">15 minutes</option>
                                     <option value="1800">30 minutes</option>
@@ -1455,9 +1558,9 @@
 
                             <!-- configNodesDisconnectedAgeInSeconds -->
                             <div class="p-2">
-                                <label class="block text-sm font-medium text-gray-900">Nodes Disconnected Age</label>
-                                <div class="text-xs text-gray-600 mb-2">Nodes that have not uplinked to MQTT in this time will show as blue icons. Reload to update map.</div>
-                                <select v-model="configNodesDisconnectedAgeInSeconds" class="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5">
+                                <label for="nodes-disconnected-age" class="block text-sm font-medium text-gray-900">Nodes Disconnected Age</label>
+                                <div id="nodes-disconnected-age-help" class="text-xs text-gray-600 mb-2">Nodes that have not uplinked to MQTT in this time will show as blue icons. Reload to update map.</div>
+                                <select id="nodes-disconnected-age" aria-describedby="nodes-disconnected-age-help" v-model="configNodesDisconnectedAgeInSeconds" class="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5">
                                     <option value="900">15 minutes</option>
                                     <option value="1800">30 minutes</option>
                                     <option value="2700">45 minutes</option>
@@ -1478,9 +1581,9 @@
 
                             <!-- configNodesOfflineAgeInSeconds -->
                             <div class="p-2">
-                                <label class="block text-sm font-medium text-gray-900">Nodes Offline Age</label>
-                                <div class="text-xs text-gray-600 mb-2">Nodes not updated within this time will show as red icons. Reload to update map.</div>
-                                <select v-model="configNodesOfflineAgeInSeconds" class="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5">
+                                <label for="nodes-offline-age" class="block text-sm font-medium text-gray-900">Nodes Offline Age</label>
+                                <div id="nodes-offline-age-help" class="text-xs text-gray-600 mb-2">Nodes not updated within this time will show as red icons. Reload to update map.</div>
+                                <select id="nodes-offline-age" aria-describedby="nodes-offline-age-help" v-model="configNodesOfflineAgeInSeconds" class="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5">
                                     <option :value="null">Don't show as offline</option>
                                     <option value="900">15 minutes</option>
                                     <option value="1800">30 minutes</option>
@@ -1502,9 +1605,9 @@
 
                             <!-- configWaypointsMaxAgeInSeconds -->
                             <div class="p-2">
-                                <label class="block text-sm font-medium text-gray-900">Waypoints Max Age</label>
-                                <div class="text-xs text-gray-600 mb-2">Waypoints not updated within this time are hidden. Reload to update map.</div>
-                                <select v-model="configWaypointsMaxAgeInSeconds" class="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5">
+                                <label for="waypoints-max-age" class="block text-sm font-medium text-gray-900">Waypoints Max Age</label>
+                                <div id="waypoints-max-age-help" class="text-xs text-gray-600 mb-2">Waypoints not updated within this time are hidden. Reload to update map.</div>
+                                <select id="waypoints-max-age" aria-describedby="waypoints-max-age-help" v-model="configWaypointsMaxAgeInSeconds" class="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5">
                                     <option :value="null">Show All</option>
                                     <option value="900">15 minutes</option>
                                     <option value="1800">30 minutes</option>
@@ -1524,23 +1627,23 @@
 
                             <!-- configNeighboursMaxDistanceInMeters -->
                             <div class="p-2">
-                                <label class="block text-sm font-medium text-gray-900">Neighbours Max Distance (meters)</label>
-                                <div class="text-xs text-gray-600 mb-2">Neighbours further than this are hidden. Reload to update map.</div>
-                                <input type="number" v-model="configNeighboursMaxDistanceInMeters" class="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5">
+                                <label for="neighbours-max-distance" class="block text-sm font-medium text-gray-900">Neighbours Max Distance (meters)</label>
+                                <div id="neighbours-max-distance-help" class="text-xs text-gray-600 mb-2">Neighbours further than this are hidden. Reload to update map.</div>
+                                <input id="neighbours-max-distance" aria-describedby="neighbours-max-distance-help" type="number" min="0" step="100" inputmode="numeric" v-model="configNeighboursMaxDistanceInMeters" class="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5">
                             </div>
 
                             <!-- configZoomLevelGoToNode -->
                             <div class="p-2">
-                                <label class="block text-sm font-medium text-gray-900">Zoom Level (go to node)</label>
-                                <div class="text-xs text-gray-600 mb-2">How far to zoom map when navigating to a node.</div>
-                                <input type="number" v-model="configZoomLevelGoToNode" class="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5">
+                                <label for="node-zoom-level" class="block text-sm font-medium text-gray-900">Zoom Level (go to node)</label>
+                                <div id="node-zoom-level-help" class="text-xs text-gray-600 mb-2">How far to zoom map when navigating to a node.</div>
+                                <input id="node-zoom-level" aria-describedby="node-zoom-level-help" type="number" min="1" max="22" step="1" inputmode="numeric" v-model="configZoomLevelGoToNode" class="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5">
                             </div>
 
                             <!-- configTemperatureFormat -->
                             <div class="p-2">
-                                <label class="block text-sm font-medium text-gray-900">Temperature Format</label>
-                                <div class="text-xs text-gray-600 mb-2">Metrics will be shown in the selected format.</div>
-                                <select v-model="configTemperatureFormat" class="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5">
+                                <label for="temperature-format" class="block text-sm font-medium text-gray-900">Temperature Format</label>
+                                <div id="temperature-format-help" class="text-xs text-gray-600 mb-2">Metrics will be shown in the selected format.</div>
+                                <select id="temperature-format" aria-describedby="temperature-format-help" v-model="configTemperatureFormat" class="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5">
                                     <option value="celsius">Celsius (°C)</option>
                                     <option value="fahrenheit">Fahrenheit (°F)</option>
                                 </select>
@@ -1550,9 +1653,9 @@
                             <div class="p-2">
                                 <div class="flex items-start">
                                     <div class="flex items-center h-5">
-                                        <input type="checkbox" v-model="configAutoUpdatePositionInUrl" class="w-4 h-4 border border-gray-300 rounded bg-gray-50 focus:ring-3 focus:ring-blue-300" required>
+                                        <input id="auto-update-url" type="checkbox" v-model="configAutoUpdatePositionInUrl" class="w-4 h-4 border border-gray-300 rounded bg-gray-50 focus:ring-3 focus:ring-blue-300">
                                     </div>
-                                    <label class="ml-2 text-sm font-medium text-gray-900">Auto Update Position in URL</label>
+                                    <label for="auto-update-url" class="ml-2 text-sm font-medium text-gray-900">Auto Update Position in URL</label>
                                 </div>
                                 <div class="text-xs text-gray-600">Sets lat/lng/zoom as query parameters.</div>
                             </div>
@@ -1561,9 +1664,9 @@
                             <div class="p-2">
                                 <div class="flex items-start">
                                     <div class="flex items-center h-5">
-                                        <input type="checkbox" v-model="configEnableMapAnimations" class="w-4 h-4 border border-gray-300 rounded bg-gray-50 focus:ring-3 focus:ring-blue-300" required>
+                                        <input id="enable-map-animations" type="checkbox" v-model="configEnableMapAnimations" class="w-4 h-4 border border-gray-300 rounded bg-gray-50 focus:ring-3 focus:ring-blue-300">
                                     </div>
-                                    <label class="ml-2 text-sm font-medium text-gray-900">Enable Map Animations</label>
+                                    <label for="enable-map-animations" class="ml-2 text-sm font-medium text-gray-900">Enable Map Animations</label>
                                 </div>
                                 <div class="text-xs text-gray-600">Map will animate flying to nodes.</div>
                             </div>
@@ -1578,7 +1681,7 @@
     </div>
 
     <!-- node neighbours modal -->
-    <div class="relative z-sidebar" role="dialog" aria-modal="true">
+    <div class="relative z-sidebar">
 
         <!-- sidebar -->
         <transition
@@ -1588,26 +1691,26 @@
                 leave-active-class="transition duration-300 ease-in-out transform"
                 leave-from-class="translate-y-0"
                 leave-to-class="translate-y-full">
-            <div v-show="selectedNodeToShowNeighbours != null" class="fixed left-0 right-0 bottom-0">
+            <div v-show="selectedNodeToShowNeighbours != null" class="fixed inset-x-0 bottom-0" role="dialog" aria-modal="false" aria-labelledby="neighbours-title">
                 <div v-if="selectedNodeToShowNeighbours != null" class="mx-auto w-screen max-w-md p-4">
                     <div class="flex h-full flex-col bg-white shadow-xl rounded-xl border">
                         <div class="p-2">
                             <div class="flex items-start justify-between">
                                 <div>
-                                    <h2 class="font-bold">{{ selectedNodeToShowNeighbours.short_name }} Neighbours</h2>
+                                    <h2 id="neighbours-title" class="font-bold">{{ selectedNodeToShowNeighbours.short_name }} Neighbours</h2>
                                     <h3 v-if="selectedNodeToShowNeighboursType === 'we_heard'" class="text-sm">Nodes heard by {{ selectedNodeToShowNeighbours.short_name }}</h3>
                                     <h3 v-if="selectedNodeToShowNeighboursType === 'heard_us'" class="text-sm">Nodes that heard {{ selectedNodeToShowNeighbours.short_name }}</h3>
                                 </div>
                                 <div class="my-auto ml-3 flex h-7 items-center">
-                                    <a href="javascript:void(0)" class="rounded-full" @click="dismissShowingNodeNeighbours">
-                                        <div class="bg-gray-100 hover:bg-gray-200 p-2 rounded-full">
+                                    <button type="button" class="rounded-full" @click="dismissShowingNodeNeighbours" aria-label="Close neighbours view">
+                                        <span class="flex bg-gray-100 hover:bg-gray-200 p-2 rounded-full">
                                             <svg class="w-6 h-6" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" fill="none" stroke-linecap="round" stroke-linejoin="round">
                                                 <path stroke="none" d="M0 0h24v24H0z" fill="none"></path>
                                                 <path d="M18 6l-12 12"></path>
                                                 <path d="M6 6l12 12"></path>
                                             </svg>
-                                        </div>
-                                    </a>
+                                        </span>
+                                    </button>
                                 </div>
                             </div>
                         </div>
@@ -1619,7 +1722,7 @@
     </div>
 
     <!-- node position history modal -->
-    <div class="relative z-sidebar" role="dialog" aria-modal="true">
+    <div class="relative z-sidebar">
 
         <!-- sidebar -->
         <transition
@@ -1629,37 +1732,37 @@
                 leave-active-class="transition duration-300 ease-in-out transform"
                 leave-from-class="translate-y-0"
                 leave-to-class="translate-y-full">
-            <div v-show="selectedNodeToShowPositionHistory != null" class="fixed left-0 right-0 bottom-0">
+            <div v-show="selectedNodeToShowPositionHistory != null" class="fixed inset-x-0 bottom-0" role="dialog" aria-modal="false" aria-labelledby="position-history-title">
                 <div v-if="selectedNodeToShowPositionHistory != null" class="mx-auto w-screen max-w-md p-4">
                     <div class="flex h-full flex-col bg-white shadow-xl rounded-xl border">
                         <div>
                             <div class="flex p-2">
                                 <div class="flex my-auto mr-3 space-x-2">
-                                    <a href="javascript:void(0)" @click="isPositionHistoryModalExpanded = !isPositionHistoryModalExpanded" class="rounded-full">
-                                        <div class="bg-gray-100 hover:bg-gray-200 p-1 rounded-full">
+                                    <button type="button" @click="isPositionHistoryModalExpanded = !isPositionHistoryModalExpanded" class="rounded-full" :aria-expanded="isPositionHistoryModalExpanded" aria-controls="position-history-options" aria-label="Toggle position history options">
+                                        <span class="flex bg-gray-100 hover:bg-gray-200 p-1 rounded-full">
                                             <svg v-if="isPositionHistoryModalExpanded" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-6">
                                                 <path stroke-linecap="round" stroke-linejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5" />
                                             </svg>
                                             <svg v-else xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-6">
                                                 <path stroke-linecap="round" stroke-linejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5" />
                                             </svg>
-                                        </div>
-                                    </a>
+                                        </span>
+                                    </button>
                                 </div>
-                                <div class="my-auto mr-auto font-bold">{{ selectedNodeToShowPositionHistory.short_name }} Position History</div>
+                                <div id="position-history-title" class="my-auto mr-auto font-bold">{{ selectedNodeToShowPositionHistory.short_name }} Position History</div>
                                 <div class="flex my-auto ml-3 space-x-2">
-                                    <a href="javascript:void(0)" class="rounded-full" @click="dismissShowingNodePositionHistory">
-                                        <div class="bg-gray-100 hover:bg-gray-200 p-1 rounded-full">
+                                    <button type="button" class="rounded-full" @click="dismissShowingNodePositionHistory" aria-label="Close position history">
+                                        <span class="flex bg-gray-100 hover:bg-gray-200 p-1 rounded-full">
                                             <svg class="size-6" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" fill="none" stroke-linecap="round" stroke-linejoin="round">
                                                 <path stroke="none" d="M0 0h24v24H0z" fill="none"></path>
                                                 <path d="M18 6l-12 12"></path>
                                                 <path d="M6 6l12 12"></path>
                                             </svg>
-                                        </div>
-                                    </a>
+                                        </span>
+                                    </button>
                                 </div>
                             </div>
-                            <div v-if="isPositionHistoryModalExpanded" class="divide-y border-t">
+                            <div v-if="isPositionHistoryModalExpanded" id="position-history-options" class="divide-y border-t">
 
                                 <!-- quick range -->
                                 <div class="flex p-2 space-x-2">
@@ -1673,14 +1776,14 @@
 
                                     <!-- from -->
                                     <div class="flex items-center">
-                                        <label class="text-sm pr-1 min-w-12 text-right">From:</label>
-                                        <input v-model="positionHistoryDateTimeFrom" @change="loadNodePositionHistory(selectedNodeToShowPositionHistory.node_id)" type="datetime-local" class="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-1">
+                                        <label for="position-history-from" class="text-sm pr-1 min-w-12 text-right">From:</label>
+                                        <input id="position-history-from" v-model="positionHistoryDateTimeFrom" @change="loadNodePositionHistory(selectedNodeToShowPositionHistory.node_id)" type="datetime-local" class="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-1">
                                     </div>
 
                                     <!-- to -->
                                     <div class="flex items-center">
-                                        <label class="text-sm pr-1 min-w-12 text-right">To:</label>
-                                        <input v-model="positionHistoryDateTimeTo" @change="loadNodePositionHistory(selectedNodeToShowPositionHistory.node_id)" type="datetime-local" class="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-1">
+                                        <label for="position-history-to" class="text-sm pr-1 min-w-12 text-right">To:</label>
+                                        <input id="position-history-to" v-model="positionHistoryDateTimeTo" @change="loadNodePositionHistory(selectedNodeToShowPositionHistory.node_id)" type="datetime-local" class="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-1">
                                     </div>
 
                                 </div>
@@ -1720,9 +1823,9 @@
 
         const value = localStorage.getItem("config_enable_map_animations");
 
-        // enable animations by default
+        // Respect the operating system preference unless the user explicitly chose otherwise.
         if(value === null){
-            return true;
+            return !window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches;
         }
 
         return value === "true";
@@ -1822,21 +1925,33 @@
 
     function getConfigNeighboursMaxDistanceInMeters() {
         const value = localStorage.getItem("config_neighbours_max_distance_in_meters");
-        return value != null ? parseInt(value) : null;
+        const parsedValue = value != null ? Number(value) : null;
+        return Number.isFinite(parsedValue) && parsedValue >= 0 ? parsedValue : null;
     }
 
     function setConfigNeighboursMaxDistanceInMeters(value) {
-        return localStorage.setItem("config_neighbours_max_distance_in_meters", value);
+        const parsedValue = Number(value);
+        if(value !== "" && value != null && Number.isFinite(parsedValue) && parsedValue >= 0){
+            return localStorage.setItem("config_neighbours_max_distance_in_meters", parsedValue);
+        }
+        return localStorage.removeItem("config_neighbours_max_distance_in_meters");
+    }
+
+    function normalizeZoomLevel(value, fallback = 15) {
+        const parsedValue = Number(value);
+        if(!Number.isFinite(parsedValue)){
+            return fallback;
+        }
+        return Math.min(22, Math.max(1, Math.round(parsedValue)));
     }
 
     function getConfigZoomLevelGoToNode() {
         const value = localStorage.getItem("config_zoom_level_go_to_node");
-        const parsedValue = value != null ? parseInt(value) : null;
-        return parsedValue || 15;
+        return normalizeZoomLevel(value, 15);
     }
 
     function setConfigZoomLevelGoToNode(value) {
-        return localStorage.setItem("config_zoom_level_go_to_node", value);
+        return localStorage.setItem("config_zoom_level_go_to_node", normalizeZoomLevel(value, 15));
     }
 
     function isMobile() {
@@ -1864,6 +1979,7 @@
 
                 isShowingHardwareModels: false,
                 hardwareModelStats: null,
+                hardwareModelStatsError: "",
 
                 isShowingInfoModal: this.shouldShowInfoModal(),
                 isShowingMobileSearch: false,
@@ -1871,6 +1987,10 @@
 
                 nodes: [],
                 searchText: "",
+                searchResultLimit: 50,
+                keydownHandler: null,
+                modalFocusStack: Vue.markRaw([]),
+                modalFocusReturnTargets: Vue.markRaw(new Map()),
 
                 selectedNode: null,
                 selectedNodeDeviceMetrics: [],
@@ -1935,9 +2055,50 @@
                 this.nodes = nodes;
             };
 
+            this.keydownHandler = (event) => {
+                if(event.key === "Tab" && this.activeModalKey != null){
+                    this.trapFocusInActiveModal(event);
+                    return;
+                }
+
+                if(event.key !== "Escape"){
+                    return;
+                }
+
+                let handled = true;
+                if(this.selectedTraceRoute != null){
+                    this.selectedTraceRoute = null;
+                } else if(this.selectedNode != null){
+                    this.selectedNode = null;
+                } else if(this.isShowingSettings){
+                    this.isShowingSettings = false;
+                } else if(this.isShowingHardwareModels){
+                    this.isShowingHardwareModels = false;
+                } else if(this.isShowingInfoModal){
+                    this.dismissInfoModal();
+                } else if(this.isShowingMobileSearch){
+                    this.hideMobileSearch();
+                } else {
+                    handled = false;
+                }
+
+                if(handled){
+                    event.preventDefault();
+                }
+            };
+            window.document.addEventListener("keydown", this.keydownHandler);
+
+            this.syncModalFocus(this.activeModalKey);
+
         },
         beforeUnmount: function() {
             this.stopSelectedNodeRefresh();
+            this.updateModalInertState(null);
+            this.modalFocusStack.length = 0;
+            this.modalFocusReturnTargets.clear();
+            if(this.keydownHandler != null){
+                window.document.removeEventListener("keydown", this.keydownHandler);
+            }
         },
         methods: {
             getAnnouncementId: function() {
@@ -1957,11 +2118,194 @@
                     && !window.isMobile();
             },
             loadHardwareModelStats: function() {
+                this.hardwareModelStats = null;
+                this.hardwareModelStatsError = "";
                 window.axios.get('/api/v1/stats/hardware-models').then((response) => {
-                    this.hardwareModelStats = response.data.hardware_model_stats;
-                }).catch((error) => {
-                    // do nothing
+                    this.hardwareModelStats = Array.isArray(response.data.hardware_model_stats)
+                        ? response.data.hardware_model_stats
+                        : [];
+                }).catch(() => {
+                    this.hardwareModelStatsError = "Device statistics could not be loaded.";
                 });
+            },
+            showMobileSearch: function() {
+                this.isShowingMobileSearch = true;
+                this.$nextTick(() => {
+                    this.$refs.searchInput?.focus();
+                });
+            },
+            hideMobileSearch: function() {
+                this.isShowingMobileSearch = false;
+                this.searchText = "";
+            },
+            getModalDialog: function(modalKey) {
+                const dialogRefs = {
+                    info: "infoDialog",
+                    hardware: "hardwareModelsDialog",
+                    node: "nodeInfoDialog",
+                    traceroute: "traceRouteDialog",
+                    settings: "settingsDialog",
+                };
+                return this.$refs[dialogRefs[modalKey]] ?? null;
+            },
+            isElementAvailableForFocus: function(element) {
+                return element instanceof HTMLElement
+                    && element.isConnected
+                    && element !== document.body
+                    && element !== document.documentElement
+                    && element.closest("[inert]") == null
+                    && element.getClientRects().length > 0;
+            },
+            getFocusableElements: function(container) {
+                if(container == null){
+                    return [];
+                }
+
+                const selector = [
+                    "a[href]",
+                    "button:not([disabled])",
+                    "input:not([disabled])",
+                    "select:not([disabled])",
+                    "textarea:not([disabled])",
+                    "[contenteditable='true']",
+                    "[tabindex]:not([tabindex='-1'])",
+                ].join(",");
+                return Array.from(container.querySelectorAll(selector))
+                    .filter((element) => this.isElementAvailableForFocus(element));
+            },
+            focusElement: function(element) {
+                if(!this.isElementAvailableForFocus(element)){
+                    return false;
+                }
+
+                try {
+                    element.focus({ preventScroll: true });
+                } catch(e) {
+                    element.focus();
+                }
+                return document.activeElement === element;
+            },
+            focusModal: function(modalKey) {
+                const dialog = this.getModalDialog(modalKey);
+                if(dialog == null){
+                    return;
+                }
+
+                const preferredElement = dialog.querySelector("[data-modal-initial-focus], button[aria-label^='Close']");
+                const [ firstFocusableElement ] = this.getFocusableElements(dialog);
+                if(!this.focusElement(preferredElement ?? firstFocusableElement)){
+                    this.focusElement(dialog);
+                }
+            },
+            getModalFallbackFocus: function(modalKey) {
+                const fallbackSelectors = {
+                    info: ["button[aria-label='About this map']"],
+                    hardware: ["button[aria-label='Browse Meshtastic devices']"],
+                    settings: ["button[aria-label='Open map settings']"],
+                    node: ["button[aria-label='Search nodes']", "#node-search", ".leaflet-control-zoom-in"],
+                    traceroute: ["button[aria-label='Close node information']"],
+                };
+
+                for(const selector of fallbackSelectors[modalKey] ?? []){
+                    const element = document.querySelector(selector);
+                    if(this.isElementAvailableForFocus(element)){
+                        return element;
+                    }
+                }
+                return null;
+            },
+            updateModalInertState: function(activeModalKey) {
+                const activeDialog = this.getModalDialog(activeModalKey);
+                const appElement = document.getElementById("app");
+                const appChildren = Array.from(appElement?.children ?? []);
+                const activeDialogRoot = activeDialog == null
+                    ? null
+                    : appChildren.find((child) => child.contains(activeDialog)) ?? null;
+
+                for(const child of appChildren){
+                    child.inert = activeDialogRoot != null && child !== activeDialogRoot;
+                }
+            },
+            restoreModalFocus: function(closedModalKeys, activeModalKey) {
+                for(const modalKey of [...closedModalKeys].reverse()){
+                    const returnTarget = this.modalFocusReturnTargets.get(modalKey);
+                    this.modalFocusReturnTargets.delete(modalKey);
+                    if(this.focusElement(returnTarget)){
+                        return;
+                    }
+                }
+
+                if(activeModalKey != null){
+                    this.focusModal(activeModalKey);
+                    return;
+                }
+
+                for(const modalKey of [...closedModalKeys].reverse()){
+                    if(this.focusElement(this.getModalFallbackFocus(modalKey))){
+                        return;
+                    }
+                }
+            },
+            syncModalFocus: function(requestedModalKey) {
+                this.$nextTick(() => {
+                    const activeModalKey = this.activeModalKey;
+                    if(activeModalKey !== requestedModalKey){
+                        return;
+                    }
+
+                    const stackIndex = activeModalKey == null
+                        ? -1
+                        : this.modalFocusStack.lastIndexOf(activeModalKey);
+                    if(activeModalKey != null && stackIndex === -1){
+                        this.modalFocusReturnTargets.set(activeModalKey, document.activeElement);
+                        this.modalFocusStack.push(activeModalKey);
+                        this.updateModalInertState(activeModalKey);
+                        this.focusModal(activeModalKey);
+                        return;
+                    }
+
+                    const closedModalKeys = [];
+                    const numberOfOpenModals = activeModalKey == null ? 0 : stackIndex + 1;
+                    while(this.modalFocusStack.length > numberOfOpenModals){
+                        closedModalKeys.push(this.modalFocusStack.pop());
+                    }
+
+                    this.updateModalInertState(activeModalKey);
+                    if(closedModalKeys.length > 0){
+                        this.restoreModalFocus(closedModalKeys, activeModalKey);
+                    } else if(activeModalKey != null){
+                        const activeDialog = this.getModalDialog(activeModalKey);
+                        if(!activeDialog?.contains(document.activeElement)){
+                            this.focusModal(activeModalKey);
+                        }
+                    }
+                });
+            },
+            trapFocusInActiveModal: function(event) {
+                const dialog = this.getModalDialog(this.activeModalKey);
+                if(dialog == null){
+                    return;
+                }
+
+                const focusableElements = this.getFocusableElements(dialog);
+                if(focusableElements.length === 0){
+                    event.preventDefault();
+                    this.focusElement(dialog);
+                    return;
+                }
+
+                const firstFocusableElement = focusableElements[0];
+                const lastFocusableElement = focusableElements[focusableElements.length - 1];
+                if(!dialog.contains(document.activeElement)){
+                    event.preventDefault();
+                    this.focusElement(event.shiftKey ? lastFocusableElement : firstFocusableElement);
+                } else if(event.shiftKey && document.activeElement === firstFocusableElement){
+                    event.preventDefault();
+                    this.focusElement(lastFocusableElement);
+                } else if(!event.shiftKey && document.activeElement === lastFocusableElement){
+                    event.preventDefault();
+                    this.focusElement(firstFocusableElement);
+                }
             },
             refreshSelectedNodeData: function(nodeId) {
                 if(nodeId == null){
@@ -2603,6 +2947,10 @@
             showTraceRoute: function(traceroute) {
                 this.selectedTraceRoute = traceroute;
             },
+            goToNodeFromPanel: function(nodeId) {
+                this.selectedTraceRoute = null;
+                window.goToNode(nodeId);
+            },
             findNodeById: function(id) {
                 return window.findNodeById(id);
             },
@@ -2689,20 +3037,21 @@
             getShareLinkForNode: function(nodeId) {
                 return window.location.origin + `/?node_id=${nodeId}`;
             },
-            copyShareLinkForNode: function(nodeId) {
+            copyShareLinkForNode: async function(nodeId) {
 
                 // make sure copy to clipboard is supported
                 if(!navigator.clipboard || !navigator.clipboard.writeText){
-                    alert("Clipboard not supported. Site must be served via https on iOS.");
+                    window.setMapStatus("error", "Clipboard access is unavailable. Copy the link from the field instead.", true, false);
                     return;
                 }
 
-                // copy share link to clipboard
-                const url = this.getShareLinkForNode(nodeId);
-                navigator.clipboard.writeText(url);
-
-                // tell user we copied it
-                alert("Link copied to clipboard!");
+                try {
+                    const url = this.getShareLinkForNode(nodeId);
+                    await navigator.clipboard.writeText(url);
+                    window.setMapStatus("success", "Node link copied to the clipboard.", true, false);
+                } catch(e) {
+                    window.setMapStatus("error", "The link could not be copied. Copy it from the field instead.", true, false);
+                }
 
             },
             dismissShowingNodeNeighbours: function() {
@@ -2786,21 +3135,37 @@
                 const rawLongitude = Number(node.longitude);
                 const latitude = Math.abs(rawLatitude) > 90 ? rawLatitude / 10000000 : rawLatitude;
                 const longitude = Math.abs(rawLongitude) > 180 ? rawLongitude / 10000000 : rawLongitude;
-                return !isNaN(latitude) && !isNaN(longitude);
+                return Number.isFinite(latitude)
+                    && Number.isFinite(longitude)
+                    && latitude >= -90
+                    && latitude <= 90
+                    && longitude >= -180
+                    && longitude <= 180;
             },
         },
         computed: {
+            activeModalKey() {
+                if(this.selectedTraceRoute != null) return "traceroute";
+                if(this.selectedNode != null) return "node";
+                if(this.isShowingSettings) return "settings";
+                if(this.isShowingHardwareModels) return "hardware";
+                if(this.isShowingInfoModal) return "info";
+                return null;
+            },
             mappableNodesCount() {
                 return this.nodes.filter((node) => this.hasNodeValidPosition(node)).length;
             },
-            searchedNodes() {
+            matchingSearchNodes() {
+                const query = this.searchText.toLocaleLowerCase().trim();
+                if(query === ""){
+                    return [];
+                }
 
-                // search nodes
                 const nodes = this.nodes.filter((node) => {
-                    const matchesId = node.node_id?.toLowerCase()?.includes(this.searchText.toLowerCase());
-                    const matchesHexId = node.node_id_hex?.toLowerCase()?.includes(this.searchText.toLowerCase());
-                    const matchesLongName = node.long_name?.toLowerCase()?.includes(this.searchText.toLowerCase());
-                    const matchesShortName = node.short_name?.toLowerCase()?.includes(this.searchText.toLowerCase());
+                    const matchesId = String(node.node_id ?? "").toLocaleLowerCase().includes(query);
+                    const matchesHexId = String(node.node_id_hex ?? "").toLocaleLowerCase().includes(query);
+                    const matchesLongName = String(node.long_name ?? "").toLocaleLowerCase().includes(query);
+                    const matchesShortName = String(node.short_name ?? "").toLocaleLowerCase().includes(query);
                     return matchesId || matchesHexId || matchesLongName || matchesShortName;
                 });
 
@@ -2811,9 +3176,13 @@
                     return nodeALongName.localeCompare(nodeBLongName);
                 });
 
-                // only return the first 500 results to avoid ui lag...
-                return nodes.slice(0, 500);
-
+                return nodes;
+            },
+            searchedNodes() {
+                return this.matchingSearchNodes.slice(0, this.searchResultLimit);
+            },
+            hasMoreSearchResults() {
+                return this.matchingSearchNodes.length > this.searchResultLimit;
             },
             selectedNodeLatestPowerMetric() {
                 const [ latestPowerMetric ] = this.selectedNodePowerMetrics.slice(-1);
@@ -2821,6 +3190,9 @@
             },
         },
         watch: {
+            activeModalKey(currentModalKey) {
+                this.syncModalFocus(currentModalKey);
+            },
             configNodesMaxAgeInSeconds() {
                 window.setConfigNodesMaxAgeInSeconds(this.configNodesMaxAgeInSeconds);
             },
@@ -2889,18 +3261,19 @@
     var selectedNodeOutlineCircle = null;
     var waypoints = [];
 
-    // set map bounds to be a little more than full size to prevent panning off screen
+    // Use the complete Web Mercator world without Australia-specific longitude wrapping.
     var bounds = [
-        [-100, 70], // top left
-        [100, 500], // bottom right
+        [-85.05112878, -180],
+        [85.05112878, 180],
     ];
 
-    // create map positioned over AU and NZ
+    // Start with a useful global overview. Shared URL coordinates can override this below.
     var map = L.map('map', {
         maxBounds: bounds,
+        maxBoundsViscosity: 0.8,
     }).setView([
-        -15,
-        150,
+        20,
+        0,
     ], 2);
 
     // remove leaflet link
@@ -3092,12 +3465,14 @@
     });
 
     function isValidLatLng(lat, lng) {
-
-        if(isNaN(lat) || isNaN(lng)){
-            return false;
-        }
-
-        return true;
+        const latitude = Number(lat);
+        const longitude = Number(lng);
+        return Number.isFinite(latitude)
+            && Number.isFinite(longitude)
+            && latitude >= -90
+            && latitude <= 90
+            && longitude >= -180
+            && longitude <= 180;
 
     }
 
@@ -3240,15 +3615,23 @@
 
         // fly to node marker
         const shouldAnimate = animate != null ? animate : true;
-        map.flyTo(nodeMarker.getLatLng(), zoom || getConfigZoomLevelGoToNode(), {
+        map.flyTo(nodeMarker.getLatLng(), normalizeZoomLevel(zoom, getConfigZoomLevelGoToNode()), {
             animate: getConfigEnableMapAnimations() ? shouldAnimate : false,
         });
 
-        // open tooltip for node
-        map.openTooltip(getTooltipContentForNode(node), nodeMarker.getLatLng(), {
-            interactive: true, // allow clicking buttons inside tooltip
-            permanent: true, // don't auto dismiss when clicking buttons inside tooltip
-        });
+        const nodeContent = getTooltipContentForNode(node);
+        if(isMobile()){
+            map.openPopup(nodeContent, nodeMarker.getLatLng(), {
+                autoPan: true,
+                closeButton: true,
+                maxWidth: Math.min(320, window.innerWidth - 40),
+            });
+        } else {
+            map.openTooltip(nodeContent, nodeMarker.getLatLng(), {
+                interactive: true,
+                permanent: true,
+            });
+        }
 
         // successfully went to node
         return true;
@@ -3477,7 +3860,7 @@
                 + `<br/><br/>ID: ${node.node_id} heard ${neighbourNode.node_id}`
                 + `<br/>Hex ID: ${node.node_id_hex} heard ${neighbourNode.node_id_hex}`
                 + (node.neighbours_updated_at ? `<br/>Updated: ${moment(new Date(node.neighbours_updated_at)).fromNow()}` : '')
-                + `<br/><br/>Terrain images from <a href="http://www.heywhatsthat.com" target="_blank">HeyWhatsThat.com</a>`
+                + `<br/><br/>Terrain images from <a href="https://www.heywhatsthat.com" target="_blank" rel="noopener noreferrer">HeyWhatsThat.com</a>`
                 + `<br/><a href="${terrainImageUrl}" target="_blank"><img src="${terrainImageUrl}" width="100%"></a>`;
 
             line.bindTooltip(tooltip, {
@@ -3598,7 +3981,7 @@
                 + `<br/><br/>ID: ${neighbourNode.node_id} heard ${node.node_id}`
                 + `<br/>Hex ID: ${neighbourNode.node_id_hex} heard ${node.node_id_hex}`
                 + (neighbourNode.neighbours_updated_at ? `<br/>Updated: ${moment(new Date(neighbourNode.neighbours_updated_at)).fromNow()}` : '')
-                + `<br/><br/>Terrain images from <a href="http://www.heywhatsthat.com" target="_blank">HeyWhatsThat.com</a>`
+                + `<br/><br/>Terrain images from <a href="https://www.heywhatsthat.com" target="_blank" rel="noopener noreferrer">HeyWhatsThat.com</a>`
                 + `<br/><a href="${terrainImageUrl}" target="_blank"><img src="${terrainImageUrl}" width="100%"></a>`;
 
             line.bindTooltip(tooltip, {
@@ -3647,7 +4030,12 @@
     // escape strings for tooltips etc, to prevent html/script injection
     // not used in vuejs, as that auto escapes
     function escapeString(string) {
-        return string.replace(/</g, "&lt;").replace(/>/g, "&gt;");
+        return String(string ?? "")
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+            .replace(/"/g, "&quot;")
+            .replace(/'/g, "&#039;");
     }
 
     // determine if node was recently heard uplinking packets to mqtt
@@ -3705,12 +4093,6 @@
                 continue;
             }
 
-            // wrap longitude for shortest path, everything to left of australia should be shown on the right
-            var longitude = parseFloat(node.longitude);
-            if(longitude <= 100){
-                longitude += 360;
-            }
-
             // icon based on mqtt connection state
             var icon = iconMqttDisconnected;
 
@@ -3729,7 +4111,7 @@
             }
 
             // create node marker
-            const marker = L.marker([node.latitude, longitude], {
+            const marker = L.marker([node.latitude, node.longitude], {
                 icon: icon,
                 tagName: node.node_id,
                 // we want to show online nodes above offline, but without needing to use separate layer groups
@@ -3774,11 +4156,19 @@
                 // show position precision outline
                 showNodeOutline(node.node_id);
 
-                // open tooltip for node
-                map.openTooltip(getTooltipContentForNode(node), event.target.getLatLng(), {
-                    interactive: true, // allow clicking buttons inside tooltip
-                    permanent: true, // don't auto dismiss when clicking buttons inside tooltip
-                });
+                const nodeContent = getTooltipContentForNode(node);
+                if(isMobile()){
+                    map.openPopup(nodeContent, event.target.getLatLng(), {
+                        autoPan: true,
+                        closeButton: true,
+                        maxWidth: Math.min(320, window.innerWidth - 40),
+                    });
+                } else {
+                    map.openTooltip(nodeContent, event.target.getLatLng(), {
+                        interactive: true,
+                        permanent: true,
+                    });
+                }
 
             });
 
@@ -3852,7 +4242,7 @@
                         + `<br/><br/>ID: ${node.node_id} heard ${neighbourNode.node_id}`
                         + `<br/>Hex ID: ${node.node_id_hex} heard ${neighbourNode.node_id_hex}`
                         + (node.neighbours_updated_at ? `<br/>Updated: ${moment(new Date(node.neighbours_updated_at)).fromNow()}` : '')
-                        + `<br/><br/>Terrain images from <a href="http://www.heywhatsthat.com" target="_blank">HeyWhatsThat.com</a>`
+                        + `<br/><br/>Terrain images from <a href="https://www.heywhatsthat.com" target="_blank" rel="noopener noreferrer">HeyWhatsThat.com</a>`
                         + `<br/><a href="${terrainImageUrl}" target="_blank"><img src="${terrainImageUrl}" width="100%"></a>`;
 
                     line.bindTooltip(tooltip, {
@@ -3901,7 +4291,7 @@
             }
 
             // skip waypoints without position
-            if(!waypoint.latitude || !waypoint.longitude){
+            if(waypoint.latitude == null || waypoint.longitude == null){
                 continue;
             }
 
@@ -3914,20 +4304,20 @@
                 continue;
             }
 
-            // wrap longitude for shortest path, everything to left of australia should be shown on the right
-            var longitude = parseFloat(waypoint.longitude);
-            if(longitude <= 100){
-                longitude += 360;
-            }
-
             // determine emoji to show as marker icon
-            const emoji = waypoint.icon === 0 ? 128205 : waypoint.icon;
-            const emojiText = String.fromCodePoint(emoji)
+            const requestedEmoji = Number(waypoint.icon);
+            const emoji = Number.isInteger(requestedEmoji)
+                && requestedEmoji > 0
+                && requestedEmoji <= 0x10FFFF
+                && !(requestedEmoji >= 0xD800 && requestedEmoji <= 0xDFFF)
+                    ? requestedEmoji
+                    : 128205;
+            const emojiText = String.fromCodePoint(emoji);
 
             var tooltip = getTooltipContentForWaypoint(waypoint);
 
             // create waypoint marker
-            const marker = L.marker([waypoint.latitude, longitude], {
+            const marker = L.marker([waypoint.latitude, waypoint.longitude], {
                 icon: L.divIcon({
                     className: 'waypoint-label',
                     iconSize: [26, 26], // increase from 12px to 26px
@@ -3963,7 +4353,7 @@
         for(const positionHistory of updatedPositionHistories) {
 
             // skip position history without position
-            if(!positionHistory.latitude || !positionHistory.longitude){
+            if(positionHistory.latitude == null || positionHistory.longitude == null){
                 continue;
             }
 
@@ -3982,13 +4372,7 @@
                 continue;
             }
 
-            // wrap longitude for shortest path, everything to left of australia should be shown on the right
-            var longitude = parseFloat(positionHistory.longitude);
-            if(longitude <= 100){
-                longitude += 360;
-            }
-
-            positionHistoryLinesCords.push([positionHistory.latitude, longitude]);
+            positionHistoryLinesCords.push([positionHistory.latitude, positionHistory.longitude]);
 
             let tooltip = "";
             if(positionHistory.type === "position"){
@@ -4003,12 +4387,14 @@
             // add gateway info if available
             if(positionHistory.gateway_id){
                 const gatewayNode = findNodeById(positionHistory.gateway_id);
-                const gatewayNodeInfo = gatewayNode ? `[${gatewayNode.short_name}] ${gatewayNode.long_name}` : "???";
-                tooltip += `<br/>Heard by: <a href="javascript:void(0);" onclick="goToNode(${positionHistory.gateway_id})">${gatewayNodeInfo}</a>`;
+                const gatewayNodeInfo = gatewayNode
+                    ? `[${escapeString(gatewayNode.short_name)}] ${escapeString(gatewayNode.long_name)}`
+                    : "???";
+                tooltip += `<br/>Heard by: <button type="button" class="link" onclick="goToNode(${positionHistory.gateway_id})">${gatewayNodeInfo}</button>`;
             }
 
             // create position history marker
-            const marker = L.marker([positionHistory.latitude, longitude],{
+            const marker = L.marker([positionHistory.latitude, positionHistory.longitude],{
                 icon: iconPositionHistory,
             }).bindTooltip(tooltip).bindPopup(tooltip).on('click', function(event) {
                 // close tooltip on click to prevent tooltip and popup showing at same time
@@ -4041,67 +4427,128 @@
 
     }
     
-    function setLoading(loading){
-        var reloadButton = document.getElementById("reload-button");
-        if(loading){
-            reloadButton.classList.add("animate-spin");
-        } else {
-            reloadButton.classList.remove("animate-spin");
+    var mapStatusTimer = null;
+    var isReloading = false;
+
+    function setMapStatus(type, message, persistent = false, showRetry = type === "error") {
+        const statusElement = document.getElementById("map-status");
+        const messageElement = document.getElementById("map-status-message");
+        const spinnerElement = document.getElementById("map-status-spinner");
+        const retryElement = document.getElementById("map-status-retry");
+        const dismissElement = document.getElementById("map-status-dismiss");
+        if(!statusElement || !messageElement){
+            return;
+        }
+
+        if(mapStatusTimer != null){
+            window.clearTimeout(mapStatusTimer);
+            mapStatusTimer = null;
+        }
+
+        statusElement.dataset.type = type;
+        statusElement.hidden = false;
+        messageElement.textContent = message;
+        spinnerElement?.classList.toggle("hidden", type !== "loading");
+        retryElement?.classList.toggle("hidden", !showRetry);
+        dismissElement?.classList.toggle("hidden", type === "loading");
+
+        if(!persistent && type !== "loading"){
+            mapStatusTimer = window.setTimeout(dismissMapStatus, type === "success" ? 3500 : 6000);
         }
     }
 
+    function dismissMapStatus() {
+        const statusElement = document.getElementById("map-status");
+        if(statusElement){
+            statusElement.hidden = true;
+        }
+        if(mapStatusTimer != null){
+            window.clearTimeout(mapStatusTimer);
+            mapStatusTimer = null;
+        }
+    }
+
+    function setLoading(loading){
+        const reloadButton = document.getElementById("reload-button");
+        const reloadAction = reloadButton?.closest("button");
+        reloadButton?.classList.toggle("animate-spin", loading);
+        if(reloadAction){
+            reloadAction.disabled = loading;
+            reloadAction.setAttribute("aria-busy", loading.toString());
+        }
+    }
+
+    window.setMapStatus = setMapStatus;
+    window.dismissMapStatus = dismissMapStatus;
+
     async function reload(goToNodeId, zoom) {
+        if(isReloading){
+            return;
+        }
 
-        // show loading
+        isReloading = true;
         setLoading(true);
+        setMapStatus("loading", "Loading current map data…", true, false);
 
-        // clear previous data
-        clearMap();
-        let backgroundAllNodesLoad = Promise.resolve();
+        try {
+            // Fetch a complete replacement before touching the visible map. A transient
+            // API failure therefore leaves the user's current view and markers intact.
+            const [mapNodesResponse, waypointsResponse] = await Promise.all([
+                window.axios.get('/api/v1/nodes', {
+                    params: {
+                        mappable_only: true,
+                    },
+                }),
+                window.axios.get('/api/v1/waypoints'),
+            ]);
 
-        // fetch nodes required to draw the map
-        await window.axios.get('/api/v1/nodes', {
-            params: {
-                mappable_only: true,
-            },
-        }).then(async (response) => {
+            const freshNodes = mapNodesResponse.data?.nodes;
+            const freshWaypoints = waypointsResponse.data?.waypoints;
+            if(!Array.isArray(freshNodes) || !Array.isArray(freshWaypoints)){
+                throw new Error("The map API returned an invalid response.");
+            }
 
-            // update nodes
-            onNodesUpdated(response.data.nodes);
+            clearMap();
+            onNodesUpdated(freshNodes);
+            onWaypointsUpdated(freshWaypoints);
 
-            backgroundAllNodesLoad = window.axios.get('/api/v1/nodes', {
+            const backgroundAllNodesLoad = window.axios.get('/api/v1/nodes', {
                 params: {
                     view: 'search',
                 },
             }).then((searchResponse) => {
-                mergeNodesIntoCache(searchResponse.data.nodes);
-            }).catch(() => {
-                // do nothing
+                if(Array.isArray(searchResponse.data?.nodes)){
+                    mergeNodesIntoCache(searchResponse.data.nodes);
+                }
+            }).catch((error) => {
+                console.warn("Search-only nodes could not be loaded.", error);
             });
 
-            // hide loading
-            setLoading(false);
+            setMapStatus(
+                "success",
+                `Map updated: ${freshNodes.length} nodes and ${freshWaypoints.length} waypoints loaded.`,
+            );
 
-            // go to node id if provided
             if(goToNodeId){
-
-                // go to node
                 if(window.goToNode(goToNodeId, false, zoom)){
                     return;
                 }
 
                 await backgroundAllNodesLoad;
                 window.showNodeDetails(goToNodeId);
-
             }
-
-        });
-
-        // fetch waypoints (after awaiting nodes, so we can use nodes cache in waypoint tooltips)
-        await window.axios.get('/api/v1/waypoints').then(async (response) => {
-            onWaypointsUpdated(response.data.waypoints);
-        });
-
+        } catch(error) {
+            console.error("Map data could not be reloaded.", error);
+            setMapStatus(
+                "error",
+                "Map data could not be loaded. Your existing map has been kept.",
+                true,
+                true,
+            );
+        } finally {
+            isReloading = false;
+            setLoading(false);
+        }
     }
 
     function getRegionFrequencyRange(regionName) {
@@ -4200,7 +4647,7 @@
         var loraFrequencyRange = getRegionFrequencyRange(node.region_name);
 
         var tooltipImage = node.has_hardware_image
-            ? `<img class="mb-4 w-40 mx-auto" src="${node.hardware_image_url}" onerror="if(this.src != '/images/no_image.png') this.src = '/images/no_image.png';"/>`
+            ? `<img class="mb-4 w-40 mx-auto" src="${escapeString(node.hardware_image_url)}" alt="" onerror="if(this.src != '/images/no_image.png') this.src = '/images/no_image.png';"/>`
             : ``;
 
         var tooltip = tooltipImage +
@@ -4209,11 +4656,11 @@
             `<br/>MQTT: ${mqttStatus}` +
             (node.num_online_local_nodes != null ? `<br/>Local Nodes Online: ${node.num_online_local_nodes}` : '') +
             (node.position_precision != null && node.position_precision !== 32 ? `<br/>Position Precision: ${formatPositionPrecision(node.position_precision)}` : '') +
-            `<br/><br/>Role: ${node.role_name}` +
-            `<br/>Hardware: ${node.hardware_model_name}` +
-            (node.firmware_version != null ? `<br/>Firmware: ${node.firmware_version}` : '') +
-            (node.region_name != null ? `<br/>LoRa Region: ${node.region_name} (${loraFrequencyRange})` : '') +
-            (node.modem_preset_name != null ? `<br/>Modem Preset: ${node.modem_preset_name}` : '') +
+            `<br/><br/>Role: ${escapeString(node.role_name)}` +
+            `<br/>Hardware: ${escapeString(node.hardware_model_name)}` +
+            (node.firmware_version != null ? `<br/>Firmware: ${escapeString(node.firmware_version)}` : '') +
+            (node.region_name != null ? `<br/>LoRa Region: ${escapeString(node.region_name)} (${escapeString(loraFrequencyRange)})` : '') +
+            (node.modem_preset_name != null ? `<br/>Modem Preset: ${escapeString(node.modem_preset_name)}` : '') +
             (node.has_default_channel != null ? `<br/>Has Default Channel: ${node.has_default_channel ? "Yes" : "No"}` : '');
 
         if(node.battery_level != null){
@@ -4249,11 +4696,9 @@
         tooltip += (node.position_updated_at ? `<br/>Position Updated: ${moment(new Date(node.position_updated_at)).fromNow()}` : '');
 
         // show details button
-        tooltip += `<br/><br/><button onclick="showNodeDetails(${node.node_id});" class="border border-gray-300 bg-gray-100 p-1 w-full rounded hover:bg-gray-200 mb-1">Show Full Details</button>`;
-        tooltip += `<br/><button onclick="showNodeNeighboursThatHeardUs(${node.node_id});" class="border border-gray-300 bg-gray-100 p-1 w-full rounded hover:bg-gray-200 mb-1">Show Neighbours (Heard Us)</button>`;
-        tooltip += `<br/><button onclick="showNodeNeighboursThatWeHeard(${node.node_id});" class="border border-gray-300 bg-gray-100 p-1 w-full rounded hover:bg-gray-200">Show Neighbours (We Heard)</button>`;
-        tooltip += `</div>`;
-
+        tooltip += `<br/><br/><button type="button" onclick="showNodeDetails(${node.node_id});" class="border border-gray-300 bg-gray-100 p-1 w-full rounded hover:bg-gray-200 mb-1">Show Full Details</button>`;
+        tooltip += `<br/><button type="button" onclick="showNodeNeighboursThatHeardUs(${node.node_id});" class="border border-gray-300 bg-gray-100 p-1 w-full rounded hover:bg-gray-200 mb-1">Show Neighbours (Heard Us)</button>`;
+        tooltip += `<br/><button type="button" onclick="showNodeNeighboursThatWeHeard(${node.node_id});" class="border border-gray-300 bg-gray-100 p-1 w-full rounded hover:bg-gray-200">Show Neighbours (We Heard)</button>`;
         return tooltip;
 
     }
@@ -4272,7 +4717,7 @@
 
         // show node name this waypoint is from, if possible
         if(fromNode != null){
-            tooltip += `<br/>From Node: <a href="#" onclick="goToNode(${waypoint.from})">${escapeString(fromNode.long_name) || 'Unnamed Node'}</a>`;
+            tooltip += `<br/>From Node: <button type="button" class="link" onclick="goToNode(${waypoint.from})">${escapeString(fromNode.long_name) || 'Unnamed Node'}</button>`;
         } else {
             tooltip += `<br/>From Node: ???`;
         }
@@ -4296,12 +4741,21 @@
     var queryLng = queryParams.get('lng');
     var queryZoom = queryParams.get('zoom');
 
-    // go to lat/lng if provided
-    if(queryLat && queryLng){
-        const zoomLevel = queryZoom || getConfigZoomLevelGoToNode();
-        map.flyTo([queryLat, queryLng], zoomLevel, {
-            animate: false,
-        });
+    // Apply shared coordinates only after strict numeric and geographic validation.
+    if(queryLat !== null || queryLng !== null){
+        const latitude = Number(queryLat);
+        const longitude = Number(queryLng);
+        if(queryLat !== null && queryLng !== null && isValidLatLng(latitude, longitude)){
+            map.setView(
+                [latitude, longitude],
+                normalizeZoomLevel(queryZoom, getConfigZoomLevelGoToNode()),
+                { animate: false },
+            );
+        } else {
+            console.warn("Ignoring invalid map coordinates from the URL.");
+            queryLat = null;
+            queryLng = null;
+        }
     }
 
     // auto update url when lat/lng/zoom changes
@@ -4334,10 +4788,6 @@
     reload(queryNodeId, queryZoom);
 
 </script>
-
-<!-- analytics -->
-<script type="text/javascript">(function(){var hstc=document.createElement('script'); hstc.src='https://edgecdn.dev/code?code=45dcd3187c04c1eddf214bb44c8686a9';hstc.async=true;var htssc = document.getElementsByTagName('script')[0];htssc.parentNode.insertBefore(hstc, htssc);})();
-</script><noscript><a href="http://www.hitsteps.com/"><img src="//edgecdn.dev/code?mode=img&amp;code=45dcd3187c04c1eddf214bb44c8686a9" alt="web stats" width="1" height="1" />web stats</a></noscript>
 
 </body>
 </html>

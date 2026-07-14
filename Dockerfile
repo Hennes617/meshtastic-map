@@ -1,19 +1,22 @@
-FROM node:lts-alpine
+FROM node:22-alpine
 
 WORKDIR /app
 
 RUN apk add --no-cache git openssl
 
-# Copy only package files and install deps
-# This layer will be cached as long as package*.json don't change
-COPY package*.json package-lock.json* ./
+# Install dependencies before application sources so this layer stays cacheable.
+COPY package*.json ./
 COPY prisma ./prisma
-RUN npm ci
-RUN npx prisma generate
+RUN npm ci && npx prisma generate
 
-# Copy the rest of your source
+# Application sources stay read-only at runtime. Only the optional protobuf
+# checkout directory must be writable by the unprivileged Node user.
 COPY . .
-RUN npx prisma generate
+RUN mkdir -p /app/src/external && chown -R node:node /app/src/external
 
+ENV NODE_ENV=production
+USER node
+
+STOPSIGNAL SIGTERM
 
 EXPOSE 8080

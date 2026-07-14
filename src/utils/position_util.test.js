@@ -45,3 +45,24 @@ test('can set integer position precision to provided bits', () => {
     expect(PositionUtil.setPositionPrecision(1747622111, 11)).toBe(1747976192);
 
 });
+
+test('validates coordinate ranges including zero longitude', () => {
+    expect(PositionUtil.hasValidCoordinates(510000000, 0)).toBe(true);
+    expect(PositionUtil.hasValidCoordinates(900000000, 1800000000)).toBe(true);
+    expect(PositionUtil.hasValidCoordinates(-900000000, -1800000000)).toBe(true);
+    expect(PositionUtil.hasValidCoordinates(900000001, 0)).toBe(false);
+    expect(PositionUtil.hasValidCoordinates(0, 1800000001)).toBe(false);
+    expect(PositionUtil.hasValidCoordinates(1.5, 0)).toBe(false);
+});
+
+test.each([0, -1, 33, 1.5, NaN, Infinity])('rejects invalid precision %p', (precision) => {
+    expect(() => PositionUtil.setPositionPrecision(100000000, precision)).toThrow(
+        "Position precision must be an integer between 1 and 32",
+    );
+});
+
+test('normalizes packet precision zero to full precision', () => {
+    expect(PositionUtil.normalizePacketPrecision(0)).toBe(32);
+    expect(PositionUtil.normalizePacketPrecision(16)).toBe(16);
+    expect(PositionUtil.normalizePacketPrecision(33)).toBeNull();
+});

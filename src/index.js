@@ -5,6 +5,21 @@ const compression = require('compression');
 const commandLineArgs = require("command-line-args");
 const commandLineUsage = require("command-line-usage");
 const { loadHardwareModels } = require("./utils/hardware_models");
+const {
+    QueryValidationError,
+    parseBoolean,
+    parseCount,
+    parseDatabaseId,
+    parseEnum,
+    parseInteger,
+    parseNodeId,
+    parseNodeIdList,
+    parseNodeIdPair,
+    parseOptionalNodeId,
+    parseOptionalString,
+    parseOrder,
+    parseTimestampRange,
+} = require("./utils/query_params");
 
 // create prisma db client
 const { PrismaClient } = require("@prisma/client");
@@ -50,6 +65,26 @@ if(options.help){
 
 // get options and fallback to default values
 const port = options["port"] ?? 8080;
+if(!Number.isInteger(port) || port < 0 || port > 65_535){
+    console.error(`Invalid --port value '${options["port"]}'; expected an integer between 0 and 65535.`);
+    process.exitCode = 1;
+    return;
+}
+
+const ONE_HOUR_IN_MILLISECONDS = 60 * 60 * 1000;
+const ONE_DAY_IN_MILLISECONDS = 24 * ONE_HOUR_IN_MILLISECONDS;
+const METRICS_DEFAULT_WINDOW_IN_MILLISECONDS = 7 * ONE_DAY_IN_MILLISECONDS;
+const METRICS_MAX_WINDOW_IN_MILLISECONDS = 31 * ONE_DAY_IN_MILLISECONDS;
+const METRICS_DEFAULT_COUNT = 2_000;
+const METRICS_MAX_COUNT = 10_000;
+const POSITION_HISTORY_DEFAULT_WINDOW_IN_MILLISECONDS = ONE_HOUR_IN_MILLISECONDS;
+const POSITION_HISTORY_MAX_WINDOW_IN_MILLISECONDS = 31 * ONE_DAY_IN_MILLISECONDS;
+const POSITION_HISTORY_DEFAULT_COUNT = 2_000;
+const POSITION_HISTORY_MAX_COUNT = 10_000;
+const TEXT_MESSAGES_DEFAULT_COUNT = 50;
+const TEXT_MESSAGES_MAX_COUNT = 200;
+const TRACEROUTES_DEFAULT_COUNT = 10;
+const TRACEROUTES_MAX_COUNT = 100;
 
 // load json
 const hardwareModels = loadHardwareModels();
@@ -146,6 +181,8 @@ const mapNodeSelect = {
     voltage: true,
     channel_utilization: true,
     air_util_tx: true,
+    neighbour_broadcast_interval_secs: true,
+    neighbours: true,
     neighbours_updated_at: true,
     mqtt_connection_state_updated_at: true,
     created_at: true,
@@ -334,49 +371,84 @@ function formatNodeInfo(node) {
     };
 }
 
-function parseNodeIds(idsValue) {
-    if(!idsValue){
-        return [];
-    }
+function parseMetricRequest(req) {
+    const nodeId = parseNodeId(req.params.nodeId, {
+        name: "nodeId",
+    });
+    const count = parseCount(req.query.count, {
+        defaultValue: METRICS_DEFAULT_COUNT,
+        maxValue: METRICS_MAX_COUNT,
+    });
+    const { timeFrom, timeTo } = parseTimestampRange(req.query, {
+        defaultWindowMs: METRICS_DEFAULT_WINDOW_IN_MILLISECONDS,
+        maxRangeMs: METRICS_MAX_WINDOW_IN_MILLISECONDS,
+    });
 
-    const ids = idsValue
-        .split(",")
-        .map((id) => id.trim())
-        .filter(Boolean)
-        .slice(0, 250);
-
-    const parsedIds = [];
-    for(const id of ids){
-        try {
-            parsedIds.push(BigInt(id));
-        } catch(err) {
-            // ignore invalid ids
-        }
-    }
-
-    return [...new Set(parsedIds)];
+    return {
+        nodeId: nodeId,
+        count: count,
+        timeFrom: new Date(timeFrom),
+        timeTo: new Date(timeTo),
+    };
 }
 
-function parseBooleanQueryParam(value) {
-    if(value == null){
-        return false;
+function sendRouteError(res, err) {
+    if(err instanceof QueryValidationError){
+        res.status(400).json({
+            message: err.message,
+        });
+        return;
     }
 
-    switch(value.toString().trim().toLowerCase()){
-        case "1":
-        case "true":
-        case "yes":
-        case "on":
-            return true;
-        default:
-            return false;
-    }
+    console.error(err);
+    res.status(500).json({
+        message: "Something went wrong, try again later.",
+    });
 }
 
 const app = express();
+let isShuttingDown = false;
+
+app.disable("x-powered-by");
+
+app.use((req, res, next) => {
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
+    res.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
+
+    // The text-message page is intentionally embeddable; protect all other routes from framing.
+    if(req.path !== "/api/v1/text-messages/embed"){
+        res.setHeader("X-Frame-Options", "SAMEORIGIN");
+        res.setHeader("Content-Security-Policy", "frame-ancestors 'self'");
+    }
+
+    next();
+});
 
 // enable compression
 app.use(compression());
+
+app.get('/api/v1/health', async (req, res) => {
+    res.setHeader("Cache-Control", "no-store");
+
+    if(isShuttingDown){
+        res.status(503).json({
+            status: "shutting_down",
+        });
+        return;
+    }
+
+    try {
+        await prisma.$queryRaw`SELECT 1`;
+        res.json({
+            status: "ok",
+        });
+    } catch(err) {
+        res.status(503).json({
+            status: "unavailable",
+        });
+    }
+});
 
 // serve files inside the public folder from /
 app.use('/', express.static(path.join(__dirname, 'public')));
@@ -391,6 +463,10 @@ app.get('/api', async (req, res) => {
         {
             "path": "/api",
             "description": "This page",
+        },
+        {
+            "path": "/api/v1/health",
+            "description": "Application and database readiness",
         },
         {
             "path": "/api/v1/nodes",
@@ -452,6 +528,7 @@ app.get('/api', async (req, res) => {
             "path": "/api/v1/nodes/:nodeId/position-history",
             "description": "Position history for a meshtastic node",
             "params": {
+                "count": "How many combined position and map-report results to return",
                 "time_from": "Only include positions created after this unix timestamp (milliseconds)",
                 "time_to": "Only include positions created before this unix timestamp (milliseconds)",
             },
@@ -505,10 +582,24 @@ app.get('/api/v1/nodes', async (req, res) => {
     try {
 
         // get query params
-        const role = req.query.role ? parseInt(req.query.role) : undefined;
-        const hardwareModel = req.query.hardware_model ? parseInt(req.query.hardware_model) : undefined;
-        const view = req.query.view === "search" ? "search" : "map";
-        const mappableOnly = parseBooleanQueryParam(req.query.mappable_only);
+        const role = parseInteger(req.query.role, {
+            name: "role",
+            min: 0,
+            max: 2_147_483_647,
+        });
+        const hardwareModel = parseInteger(req.query.hardware_model, {
+            name: "hardware_model",
+            min: 0,
+            max: 2_147_483_647,
+        });
+        const view = parseEnum(req.query.view, {
+            name: "view",
+            allowedValues: ["map", "search"],
+            defaultValue: "map",
+        });
+        const mappableOnly = parseBoolean(req.query.mappable_only, {
+            name: "mappable_only",
+        });
 
         const where = {
             role: role,
@@ -533,17 +624,17 @@ app.get('/api/v1/nodes', async (req, res) => {
         });
 
     } catch(err) {
-        console.error(err);
-        res.status(500).json({
-            message: "Something went wrong, try again later.",
-        });
+        sendRouteError(res, err);
     }
 });
 
 app.get('/api/v1/nodes/by-ids', async (req, res) => {
     try {
 
-        const ids = parseNodeIds(req.query.ids ?? "");
+        const ids = parseNodeIdList(req.query.ids, {
+            name: "ids",
+            maxItems: 250,
+        });
         if(ids.length === 0){
             res.json({
                 nodes: [],
@@ -565,17 +656,16 @@ app.get('/api/v1/nodes/by-ids', async (req, res) => {
         });
 
     } catch(err) {
-        console.error(err);
-        res.status(500).json({
-            message: "Something went wrong, try again later.",
-        });
+        sendRouteError(res, err);
     }
 });
 
 app.get('/api/v1/nodes/:nodeId', async (req, res) => {
     try {
 
-        const nodeId = parseInt(req.params.nodeId);
+        const nodeId = parseNodeId(req.params.nodeId, {
+            name: "nodeId",
+        });
 
         // find node
         const node = await prisma.node.findUnique({
@@ -597,25 +687,22 @@ app.get('/api/v1/nodes/:nodeId', async (req, res) => {
         });
 
     } catch(err) {
-        console.error(err);
-        res.status(500).json({
-            message: "Something went wrong, try again later.",
-        });
+        sendRouteError(res, err);
     }
 });
 
 app.get('/api/v1/nodes/:nodeId/device-metrics', async (req, res) => {
     try {
 
-        const nodeId = parseInt(req.params.nodeId);
-        const count = req.query.count ? parseInt(req.query.count) : undefined;
-        const timeFrom = req.query.time_from ? parseInt(req.query.time_from) : undefined;
-        const timeTo = req.query.time_to ? parseInt(req.query.time_to) : undefined;
+        const { nodeId, count, timeFrom, timeTo } = parseMetricRequest(req);
 
         // find node
-        const node = await prisma.node.findFirst({
+        const node = await prisma.node.findUnique({
             where: {
                 node_id: nodeId,
+            },
+            select: {
+                node_id: true,
             },
         });
 
@@ -632,8 +719,8 @@ app.get('/api/v1/nodes/:nodeId/device-metrics', async (req, res) => {
             where: {
                 node_id: node.node_id,
                 created_at: {
-                    gte: timeFrom ? new Date(timeFrom) : undefined,
-                    lte: timeTo ? new Date(timeTo) : undefined,
+                    gte: timeFrom,
+                    lte: timeTo,
                 },
             },
             orderBy: {
@@ -647,25 +734,22 @@ app.get('/api/v1/nodes/:nodeId/device-metrics', async (req, res) => {
         });
 
     } catch(err) {
-        console.error(err);
-        res.status(500).json({
-            message: "Something went wrong, try again later.",
-        });
+        sendRouteError(res, err);
     }
 });
 
 app.get('/api/v1/nodes/:nodeId/environment-metrics', async (req, res) => {
     try {
 
-        const nodeId = parseInt(req.params.nodeId);
-        const count = req.query.count ? parseInt(req.query.count) : undefined;
-        const timeFrom = req.query.time_from ? parseInt(req.query.time_from) : undefined;
-        const timeTo = req.query.time_to ? parseInt(req.query.time_to) : undefined;
+        const { nodeId, count, timeFrom, timeTo } = parseMetricRequest(req);
 
         // find node
-        const node = await prisma.node.findFirst({
+        const node = await prisma.node.findUnique({
             where: {
                 node_id: nodeId,
+            },
+            select: {
+                node_id: true,
             },
         });
 
@@ -682,8 +766,8 @@ app.get('/api/v1/nodes/:nodeId/environment-metrics', async (req, res) => {
             where: {
                 node_id: node.node_id,
                 created_at: {
-                    gte: timeFrom ? new Date(timeFrom) : undefined,
-                    lte: timeTo ? new Date(timeTo) : undefined,
+                    gte: timeFrom,
+                    lte: timeTo,
                 },
             },
             orderBy: {
@@ -697,25 +781,22 @@ app.get('/api/v1/nodes/:nodeId/environment-metrics', async (req, res) => {
         });
 
     } catch(err) {
-        console.error(err);
-        res.status(500).json({
-            message: "Something went wrong, try again later.",
-        });
+        sendRouteError(res, err);
     }
 });
 
 app.get('/api/v1/nodes/:nodeId/power-metrics', async (req, res) => {
     try {
 
-        const nodeId = parseInt(req.params.nodeId);
-        const count = req.query.count ? parseInt(req.query.count) : undefined;
-        const timeFrom = req.query.time_from ? parseInt(req.query.time_from) : undefined;
-        const timeTo = req.query.time_to ? parseInt(req.query.time_to) : undefined;
+        const { nodeId, count, timeFrom, timeTo } = parseMetricRequest(req);
 
         // find node
-        const node = await prisma.node.findFirst({
+        const node = await prisma.node.findUnique({
             where: {
                 node_id: nodeId,
+            },
+            select: {
+                node_id: true,
             },
         });
 
@@ -732,8 +813,8 @@ app.get('/api/v1/nodes/:nodeId/power-metrics', async (req, res) => {
             where: {
                 node_id: node.node_id,
                 created_at: {
-                    gte: timeFrom ? new Date(timeFrom) : undefined,
-                    lte: timeTo ? new Date(timeTo) : undefined,
+                    gte: timeFrom,
+                    lte: timeTo,
                 },
             },
             orderBy: {
@@ -747,22 +828,24 @@ app.get('/api/v1/nodes/:nodeId/power-metrics', async (req, res) => {
         });
 
     } catch(err) {
-        console.error(err);
-        res.status(500).json({
-            message: "Something went wrong, try again later.",
-        });
+        sendRouteError(res, err);
     }
 });
 
 app.get('/api/v1/nodes/:nodeId/mqtt-metrics', async (req, res) => {
     try {
 
-        const nodeId = parseInt(req.params.nodeId);
+        const nodeId = parseNodeId(req.params.nodeId, {
+            name: "nodeId",
+        });
 
         // find node
-        const node = await prisma.node.findFirst({
+        const node = await prisma.node.findUnique({
             where: {
                 node_id: nodeId,
+            },
+            select: {
+                node_id: true,
             },
         });
 
@@ -775,29 +858,33 @@ app.get('/api/v1/nodes/:nodeId/mqtt-metrics', async (req, res) => {
         }
 
         // get mqtt topics published to by this node
-        const queryResult = await prisma.$queryRaw`select mqtt_topic, count(*) as packet_count, max(created_at) as last_packet_at from service_envelopes where gateway_id = ${nodeId} group by mqtt_topic order by packet_count desc;`;
+        const queryResult = await prisma.$queryRaw`select mqtt_topic, count(*) as packet_count, max(created_at) as last_packet_at from service_envelopes where gateway_id = ${node.node_id} group by mqtt_topic order by packet_count desc;`;
 
         res.json({
             mqtt_metrics: queryResult,
         });
 
     } catch(err) {
-        console.error(err);
-        res.status(500).json({
-            message: "Something went wrong, try again later.",
-        });
+        sendRouteError(res, err);
     }
 });
 
 app.get('/api/v1/nodes/:nodeId/neighbours', async (req, res) => {
     try {
 
-        const nodeId = parseInt(req.params.nodeId);
+        const nodeId = parseNodeId(req.params.nodeId, {
+            name: "nodeId",
+        });
 
         // find node
-        const node = await prisma.node.findFirst({
+        const node = await prisma.node.findUnique({
             where: {
                 node_id: nodeId,
+            },
+            select: {
+                node_id: true,
+                neighbours: true,
+                neighbours_updated_at: true,
             },
         });
 
@@ -818,43 +905,65 @@ app.get('/api/v1/nodes/:nodeId/neighbours', async (req, res) => {
                     },
                 },
             },
+            select: {
+                node_id: true,
+                neighbours: true,
+                neighbours_updated_at: true,
+            },
+        });
+
+        const nodesThatWeHeard = Array.isArray(node.neighbours) ? node.neighbours : [];
+        const nodesThatHeardUsWithInfo = nodesThatHeardUs.flatMap((nodeThatHeardUs) => {
+            const neighbours = Array.isArray(nodeThatHeardUs.neighbours) ? nodeThatHeardUs.neighbours : [];
+            const neighbourInfo = neighbours.find((neighbour) => {
+                return neighbour?.node_id != null
+                    && neighbour.node_id.toString() === node.node_id.toString();
+            });
+
+            if(neighbourInfo == null){
+                return [];
+            }
+
+            return [{
+                node_id: Number(nodeThatHeardUs.node_id),
+                snr: neighbourInfo.snr ?? null,
+                updated_at: nodeThatHeardUs.neighbours_updated_at,
+            }];
         });
 
         res.json({
-            nodes_that_we_heard: node.neighbours.map((neighbour) => {
+            nodes_that_we_heard: nodesThatWeHeard.map((neighbour) => {
                 return {
                     ...neighbour,
                     updated_at: node.neighbours_updated_at,
                 };
             }),
-            nodes_that_heard_us: nodesThatHeardUs.map((nodeThatHeardUs) => {
-                const neighbourInfo = nodeThatHeardUs.neighbours.find((neighbour) => neighbour.node_id.toString() === node.node_id.toString());
-                return {
-                    node_id: Number(nodeThatHeardUs.node_id),
-                    snr: neighbourInfo.snr,
-                    updated_at: nodeThatHeardUs.neighbours_updated_at,
-                };
-            }),
+            nodes_that_heard_us: nodesThatHeardUsWithInfo,
         });
 
     } catch(err) {
-        console.error(err);
-        res.status(500).json({
-            message: "Something went wrong, try again later.",
-        });
+        sendRouteError(res, err);
     }
 });
 
 app.get('/api/v1/nodes/:nodeId/traceroutes', async (req, res) => {
     try {
 
-        const nodeId = parseInt(req.params.nodeId);
-        const count = req.query.count ? parseInt(req.query.count) : 10; // can't set to null because of $queryRaw
+        const nodeId = parseNodeId(req.params.nodeId, {
+            name: "nodeId",
+        });
+        const count = parseCount(req.query.count, {
+            defaultValue: TRACEROUTES_DEFAULT_COUNT,
+            maxValue: TRACEROUTES_MAX_COUNT,
+        });
 
         // find node
-        const node = await prisma.node.findFirst({
+        const node = await prisma.node.findUnique({
             where: {
                 node_id: nodeId,
+            },
+            select: {
+                node_id: true,
             },
         });
 
@@ -900,29 +1009,33 @@ app.get('/api/v1/nodes/:nodeId/traceroutes', async (req, res) => {
         });
 
     } catch(err) {
-        console.error(err);
-        res.status(500).json({
-            message: "Something went wrong, try again later.",
-        });
+        sendRouteError(res, err);
     }
 });
 
 app.get('/api/v1/nodes/:nodeId/position-history', async (req, res) => {
     try {
 
-        // defaults
-        const nowInMilliseconds = new Date().getTime();
-        const oneHourAgoInMilliseconds = new Date().getTime() - (3600 * 1000);
-
         // get request params
-        const nodeId = parseInt(req.params.nodeId);
-        const timeFrom = req.query.time_from ? parseInt(req.query.time_from) : oneHourAgoInMilliseconds;
-        const timeTo = req.query.time_to ? parseInt(req.query.time_to) : nowInMilliseconds;
+        const nodeId = parseNodeId(req.params.nodeId, {
+            name: "nodeId",
+        });
+        const count = parseCount(req.query.count, {
+            defaultValue: POSITION_HISTORY_DEFAULT_COUNT,
+            maxValue: POSITION_HISTORY_MAX_COUNT,
+        });
+        const { timeFrom, timeTo } = parseTimestampRange(req.query, {
+            defaultWindowMs: POSITION_HISTORY_DEFAULT_WINDOW_IN_MILLISECONDS,
+            maxRangeMs: POSITION_HISTORY_MAX_WINDOW_IN_MILLISECONDS,
+        });
 
         // find node
-        const node = await prisma.node.findFirst({
+        const node = await prisma.node.findUnique({
             where: {
                 node_id: nodeId,
+            },
+            select: {
+                node_id: true,
             },
         });
 
@@ -934,30 +1047,56 @@ app.get('/api/v1/nodes/:nodeId/position-history', async (req, res) => {
             return;
         }
 
-        const positions = await prisma.position.findMany({
-            where: {
-                node_id: nodeId,
-                created_at: {
-                    gte: new Date(timeFrom),
-                    lte: new Date(timeTo),
+        const [positions, mapReports] = await Promise.all([
+            prisma.position.findMany({
+                where: {
+                    node_id: node.node_id,
+                    created_at: {
+                        gte: new Date(timeFrom),
+                        lte: new Date(timeTo),
+                    },
                 },
-            }
-        });
-
-        const mapReports = await prisma.mapReport.findMany({
-            where: {
-                node_id: nodeId,
-                created_at: {
-                    gte: new Date(timeFrom),
-                    lte: new Date(timeTo),
+                select: {
+                    id: true,
+                    node_id: true,
+                    latitude: true,
+                    longitude: true,
+                    altitude: true,
+                    gateway_id: true,
+                    channel_id: true,
+                    created_at: true,
                 },
-            }
-        });
-        
-        const positionHistory = []
+                orderBy: [
+                    { created_at: "desc" },
+                    { id: "desc" },
+                ],
+                take: count,
+            }),
+            prisma.mapReport.findMany({
+                where: {
+                    node_id: node.node_id,
+                    created_at: {
+                        gte: new Date(timeFrom),
+                        lte: new Date(timeTo),
+                    },
+                },
+                select: {
+                    node_id: true,
+                    latitude: true,
+                    longitude: true,
+                    altitude: true,
+                    created_at: true,
+                },
+                orderBy: [
+                    { created_at: "desc" },
+                    { id: "desc" },
+                ],
+                take: count,
+            }),
+        ]);
 
-        positions.forEach((position) => {
-            positionHistory.push({
+        const positionHistory = [
+            ...positions.map((position) => ({
                 id: position.id,
                 node_id: position.node_id,
                 type: "position",
@@ -967,32 +1106,27 @@ app.get('/api/v1/nodes/:nodeId/position-history', async (req, res) => {
                 gateway_id: position.gateway_id,
                 channel_id: position.channel_id,
                 created_at: position.created_at,
-            });
-        });
-
-        mapReports.forEach((mapReport) => {
-            positionHistory.push({
+            })),
+            ...mapReports.map((mapReport) => ({
                 node_id: mapReport.node_id,
                 type: "map_report",
                 latitude: mapReport.latitude,
                 longitude: mapReport.longitude,
                 altitude: mapReport.altitude,
                 created_at: mapReport.created_at,
-            });
-        });
-
-        // sort oldest to newest
-        positionHistory.sort((a, b) => a.created_at - b.created_at);
+            })),
+        ]
+            // Keep the newest combined rows within the cap, then return them oldest-first for the map.
+            .sort((a, b) => b.created_at - a.created_at)
+            .slice(0, count)
+            .sort((a, b) => a.created_at - b.created_at);
 
         res.json({
             position_history: positionHistory,
         });
 
     } catch(err) {
-        console.error(err);
-        res.status(500).json({
-            message: "Something went wrong, try again later.",
-        });
+        sendRouteError(res, err);
     }
 });
 
@@ -1028,10 +1162,7 @@ app.get('/api/v1/stats/hardware-models', async (req, res) => {
         });
 
     } catch(err) {
-        console.error(err);
-        res.status(500).json({
-            message: "Something went wrong, try again later.",
-        });
+        sendRouteError(res, err);
     }
 });
 
@@ -1039,22 +1170,24 @@ app.get('/api/v1/text-messages', async (req, res) => {
     try {
 
         // get query params
-        const to = req.query.to ?? undefined;
-        const from = req.query.from ?? undefined;
-        const channelId = req.query.channel_id ?? undefined;
-        const gatewayId = req.query.gateway_id ?? undefined;
-        const directMessageNodeIds = req.query.direct_message_node_ids?.split(",") ?? undefined;
-        const lastId = req.query.last_id ? parseInt(req.query.last_id) : undefined;
-        const count = req.query.count ? parseInt(req.query.count) : 50;
-        const order = req.query.order ?? "asc";
-
-        // if direct message node ids are provided, there should be exactly two node ids
-        if(directMessageNodeIds !== undefined && directMessageNodeIds.length !== 2){
-            res.status(400).json({
-                message: "direct_message_node_ids requires 2 node ids separated by a comma.",
-            });
-            return;
-        }
+        const to = parseOptionalNodeId(req.query.to, { name: "to" });
+        const from = parseOptionalNodeId(req.query.from, { name: "from" });
+        const channelId = parseOptionalString(req.query.channel_id, { name: "channel_id" });
+        const gatewayId = parseOptionalNodeId(req.query.gateway_id, { name: "gateway_id" });
+        const directMessageNodeIds = parseNodeIdPair(req.query.direct_message_node_ids, {
+            name: "direct_message_node_ids",
+        });
+        const lastId = parseDatabaseId(req.query.last_id, {
+            name: "last_id",
+            defaultValue: undefined,
+        });
+        const count = parseCount(req.query.count, {
+            defaultValue: TEXT_MESSAGES_DEFAULT_COUNT,
+            maxValue: TEXT_MESSAGES_MAX_COUNT,
+        });
+        const order = parseOrder(req.query.order, {
+            defaultValue: "asc",
+        });
 
         // default where clauses that should always be used for filtering
         var where = {
@@ -1062,11 +1195,9 @@ app.get('/api/v1/text-messages', async (req, res) => {
             gateway_id: gatewayId,
             // when ordered oldest to newest (asc), only get records after last id
             // when ordered newest to oldest (desc), only get records before last id
-            id: order === "asc" ? {
-                gt: lastId,
-            } : {
-                lt: lastId,
-            },
+            id: lastId == null
+                ? undefined
+                : order === "asc" ? { gt: lastId } : { lt: lastId },
         };
 
         // if direct message node ids are provided, we expect exactly 2 node ids
@@ -1109,9 +1240,7 @@ app.get('/api/v1/text-messages', async (req, res) => {
         });
 
     } catch(err) {
-        res.status(500).json({
-            message: "Something went wrong, try again later.",
-        });
+        sendRouteError(res, err);
     }
 });
 
@@ -1143,9 +1272,7 @@ app.get('/api/v1/waypoints', async (req, res) => {
         });
 
     } catch(err) {
-        res.status(500).json({
-            message: "Something went wrong, try again later.",
-        });
+        sendRouteError(res, err);
     }
 });
 
@@ -1153,4 +1280,63 @@ app.get('/api/v1/waypoints', async (req, res) => {
 const listener = app.listen(port, () => {
     const port = listener.address().port;
     console.log(`Server running at http://127.0.0.1:${port}`);
+});
+
+async function shutdown(signal) {
+    if(isShuttingDown){
+        return;
+    }
+
+    isShuttingDown = true;
+    console.log(`Received ${signal}; stopping HTTP server.`);
+
+    const forceShutdownTimer = setTimeout(() => {
+        console.error("Graceful shutdown timed out; forcing exit.");
+        if(typeof listener.closeAllConnections === "function"){
+            listener.closeAllConnections();
+        }
+        process.exit(1);
+    }, 10_000);
+    forceShutdownTimer.unref();
+
+    let exitCode = 0;
+    try {
+        if(listener.listening){
+            await new Promise((resolve, reject) => {
+                listener.close((err) => {
+                    if(err){
+                        reject(err);
+                        return;
+                    }
+
+                    resolve();
+                });
+
+                if(typeof listener.closeIdleConnections === "function"){
+                    listener.closeIdleConnections();
+                }
+            });
+        }
+    } catch(err) {
+        exitCode = 1;
+        console.error("Failed to close HTTP server cleanly.", err);
+    } finally {
+        try {
+            await prisma.$disconnect();
+        } catch(err) {
+            exitCode = 1;
+            console.error("Failed to disconnect Prisma cleanly.", err);
+        }
+
+        clearTimeout(forceShutdownTimer);
+        process.exitCode = exitCode;
+    }
+}
+
+process.once("SIGTERM", () => {
+    void shutdown("SIGTERM");
+});
+
+process.once("SIGINT", () => {
+    void shutdown("SIGINT");
 });

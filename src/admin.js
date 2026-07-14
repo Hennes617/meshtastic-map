@@ -37,7 +37,12 @@ const optionsList = [
     {
         name: "purge-duplicate-nodes-by-position",
         type: Boolean,
-        description: "Purges duplicate node records that share the same latitude and longitude, keeping the most recently updated node.",
+        description: "Lists node records that share the same latitude and longitude. This is a dry run unless --confirm-duplicate-position-purge is also provided.",
+    },
+    {
+        name: "confirm-duplicate-position-purge",
+        type: Boolean,
+        description: "Actually purge nodes reported by --purge-duplicate-nodes-by-position. Review the dry-run output first; co-located nodes may be legitimate.",
     },
     {
         name: "import-node-identities-url",
@@ -74,6 +79,7 @@ if(options.help){
 const purgeNodeId = options["purge-node-id"] ?? null;
 const repairNodeIdentities = options["repair-node-identities"] ?? false;
 const purgeDuplicateNodesByPosition = options["purge-duplicate-nodes-by-position"] ?? false;
+const confirmDuplicatePositionPurge = options["confirm-duplicate-position-purge"] ?? false;
 const importNodeIdentitiesUrl = options["import-node-identities-url"] ?? null;
 const importNodeIdentitiesFile = options["import-node-identities-file"] ?? null;
 
@@ -81,71 +87,70 @@ async function purgeNodeById(nodeId) {
 
     // convert to numeric id
     nodeId = NodeIdUtil.convertToNumeric(nodeId);
+    if(nodeId === NodeIdUtil.MAX_NODE_ID){
+        throw new Error("Refusing to purge the Meshtastic broadcast address (!FFFFFFFF).");
+    }
 
-    // purge environment metrics
-    await prisma.environmentMetric.deleteMany({
-        where: {
-            node_id: nodeId,
-        },
-    });
+    const deleteOperations = [
+        prisma.deviceMetric.deleteMany({ where: { node_id: nodeId } }),
+        prisma.environmentMetric.deleteMany({ where: { node_id: nodeId } }),
+        prisma.mapReport.deleteMany({ where: { node_id: nodeId } }),
+        prisma.neighbourInfo.deleteMany({ where: { node_id: nodeId } }),
+        prisma.position.deleteMany({
+            where: {
+                OR: [
+                    { node_id: nodeId },
+                    { from: nodeId },
+                    { to: nodeId },
+                    { gateway_id: nodeId },
+                ],
+            },
+        }),
+        prisma.powerMetric.deleteMany({ where: { node_id: nodeId } }),
+        prisma.serviceEnvelope.deleteMany({
+            where: {
+                OR: [
+                    { from: nodeId },
+                    { to: nodeId },
+                    { gateway_id: nodeId },
+                ],
+            },
+        }),
+        prisma.textMessage.deleteMany({
+            where: {
+                OR: [
+                    { from: nodeId },
+                    { to: nodeId },
+                    { gateway_id: nodeId },
+                ],
+            },
+        }),
+        prisma.traceRoute.deleteMany({
+            where: {
+                OR: [
+                    { from: nodeId },
+                    { to: nodeId },
+                    { gateway_id: nodeId },
+                ],
+            },
+        }),
+        prisma.waypoint.deleteMany({
+            where: {
+                OR: [
+                    { from: nodeId },
+                    { to: nodeId },
+                    { gateway_id: nodeId },
+                    { locked_to: nodeId },
+                ],
+            },
+        }),
+        prisma.node.deleteMany({ where: { node_id: nodeId } }),
+    ];
 
-    // purge map reports
-    await prisma.mapReport.deleteMany({
-        where: {
-            node_id: nodeId,
-        },
-    });
+    const results = await prisma.$transaction(deleteOperations);
+    const deletedRecords = results.reduce((total, result) => total + result.count, 0);
 
-    // purge neighbour infos
-    await prisma.neighbourInfo.deleteMany({
-        where: {
-            node_id: nodeId,
-        },
-    });
-
-    // purge this node
-    await prisma.node.deleteMany({
-        where: {
-            node_id: nodeId,
-        },
-    });
-
-    // purge positions
-    await prisma.position.deleteMany({
-        where: {
-            node_id: nodeId,
-        },
-    });
-
-    // purge power metrics
-    await prisma.powerMetric.deleteMany({
-        where: {
-            node_id: nodeId,
-        },
-    });
-
-    // purge text messages
-    await prisma.textMessage.deleteMany({
-        where: {
-            from: nodeId,
-        },
-    });
-
-    // purge traceroutes
-    await prisma.traceRoute.deleteMany({
-        where: {
-            from: nodeId,
-        },
-    });
-
-    // purge waypoints
-    await prisma.waypoint.deleteMany({
-        where: {
-            from: nodeId,
-        },
-    });
-
-    console.log(`✅ Node '${nodeId}' has been purged from the database.`);
+    console.log(`✅ Node '${nodeId}' and ${deletedRecords - results.at(-1).count} related record(s) have been purged from the database.`);
 
 }
 
@@ -306,7 +311,7 @@ async function repairNodeIdentitiesFromMapReports() {
     }
 }
 
-async function purgeDuplicateNodesByLocation() {
+async function purgeDuplicateNodesByLocation({ confirm = false } = {}) {
     const duplicateCoordinateGroups = await prisma.node.groupBy({
         by: ["latitude", "longitude"],
         where: {
@@ -339,6 +344,7 @@ async function purgeDuplicateNodesByLocation() {
         return;
     }
 
+    let candidateNodesCount = 0;
     let purgedNodesCount = 0;
     for(const duplicateGroup of duplicateCoordinateGroups){
         const nodesAtCoordinate = await prisma.node.findMany({
@@ -374,15 +380,25 @@ async function purgeDuplicateNodesByLocation() {
             continue;
         }
 
-        console.log(`Keeping node ${nodeToKeep.node_id.toString()} at (${duplicateGroup.latitude}, ${duplicateGroup.longitude}) and purging ${nodesToPurge.length} duplicate(s).`);
+        candidateNodesCount += nodesToPurge.length;
+        const action = confirm ? "purging" : "would purge";
+        console.log(`Keeping node ${nodeToKeep.node_id.toString()} at (${duplicateGroup.latitude}, ${duplicateGroup.longitude}) and ${action} ${nodesToPurge.length} possible duplicate(s): ${nodesToPurge.map((node) => node.node_id.toString()).join(", ")}.`);
 
-        for(const nodeToPurge of nodesToPurge){
-            await purgeNodeById(nodeToPurge.node_id);
-            purgedNodesCount += 1;
+        if(confirm){
+            for(const nodeToPurge of nodesToPurge){
+                await purgeNodeById(nodeToPurge.node_id);
+                purgedNodesCount += 1;
+            }
         }
     }
 
-    console.log(`✅ Finished purging duplicate node locations. Removed ${purgedNodesCount} duplicate node(s) across ${duplicateCoordinateGroups.length} location group(s).`);
+    if(!confirm){
+        console.log(`Dry run complete: ${candidateNodesCount} possible duplicate(s) across ${duplicateCoordinateGroups.length} location group(s). No data was changed.`);
+        console.log("Review these nodes carefully. Co-located nodes can be legitimate. Re-run with --purge-duplicate-nodes-by-position --confirm-duplicate-position-purge to delete them.");
+        return;
+    }
+
+    console.log(`✅ Finished purging duplicate node locations. Removed ${purgedNodesCount} node(s) across ${duplicateCoordinateGroups.length} location group(s).`);
 }
 
 (async () => {
@@ -398,7 +414,9 @@ async function purgeDuplicateNodesByLocation() {
         }
 
         if(purgeDuplicateNodesByPosition){
-            await purgeDuplicateNodesByLocation();
+            await purgeDuplicateNodesByLocation({
+                confirm: confirmDuplicatePositionPurge,
+            });
         }
 
         if(importNodeIdentitiesFile){
